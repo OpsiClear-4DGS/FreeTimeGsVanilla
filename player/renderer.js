@@ -167,7 +167,7 @@ export class SplatRenderer {
     const height = Math.ceil(texels / width);
     if (height > max)
       throw new Error(
-        "Model exceeds this GPU's texture capacity. Choose a lower point limit.",
+        "This model exceeds this GPU's texture capacity.",
       );
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -204,7 +204,7 @@ export class SplatRenderer {
       );
     if (gl.getError() !== gl.NO_ERROR) {
       gl.deleteTexture(texture);
-      throw new Error("GPU upload failed. Try a lower point limit.");
+      throw new Error("GPU upload failed. Try a smaller model.");
     }
     return texture;
   }

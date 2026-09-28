@@ -4,45 +4,60 @@ import { SplatRenderer } from "./renderer.js";
 import { demoFile } from "./demo.js";
 
 const $ = (id) => document.getElementById(id);
-const number = (value) => value.toLocaleString();
+const query = new URLSearchParams(location.search);
+const fps = [24, 30, 60].includes(Number(query.get("fps")))
+  ? Number(query.get("fps"))
+  : 30;
+const requestedPoints = Number(query.get("points"));
+const maxPoints =
+  query.get("points") === "all"
+    ? Infinity
+    : Number.isSafeInteger(requestedPoints) && requestedPoints > 0
+      ? requestedPoints
+      : 1000000;
+const resolution = query.get("resolution") === "half" ? 0.5 : 1;
+const requestedFrames = Number(query.get("frames"));
 const clock = (seconds) => {
-  const hundredths = Math.round(seconds * 100);
-  return `${Math.floor(hundredths / 6000)
-    .toString()
-    .padStart(
-      2,
-      "0",
-    )}:${((hundredths % 6000) / 100).toFixed(2).padStart(5, "0")}`;
+  const tenths = Math.round(seconds * 10);
+  return `${Math.floor(tenths / 600)}:${((tenths % 600) / 10).toFixed(1).padStart(4, "0")}`;
 };
 let renderer, camera, worker, pending, model, source, loadController;
-let bookmarkView, bookmarkURL;
+let bookmarkView, bookmarkURL, idleTimer, messageTimer;
 let generation = 0,
   time = 0,
   playing = false,
-  loop = true,
   loading = false,
   dirty = true,
   raf;
-let previousTick = performance.now(),
-  lastDraw = 0,
-  smoothFPS = 0;
+let previousTick = performance.now();
 
-function status(text, state = "ready") {
-  $("message-text").textContent = text;
-  $("message").dataset.state = state;
+function wakeControls() {
+  clearTimeout(idleTimer);
+  $("viewer").classList.remove("idle");
+  if (playing && !loading)
+    idleTimer = setTimeout(() => $("viewer").classList.add("idle"), 1800);
 }
-function frameCount() {
-  return Math.max(1, Number($("frames").value) || 1);
+function status(text = "", state = "ready", timeout = 0) {
+  clearTimeout(messageTimer);
+  $("viewer").dataset.state = state;
+  $("viewer").setAttribute("aria-busy", String(state === "loading"));
+  $("message").dataset.state = state;
+  $("message").textContent = text;
+  $("message").hidden = !text;
+  if (timeout)
+    messageTimer = setTimeout(() => {
+      $("message").hidden = true;
+    }, timeout);
 }
 function duration() {
-  return Math.max(1, frameCount() - 1) / Number($("fps").value);
+  return Math.max(1, model.nFrames - 1) / fps;
 }
 function updateTime() {
   $("timeline").value = time;
   $("timeline").style.setProperty("--progress", `${time * 100}%`);
   $("timeline").setAttribute(
     "aria-valuetext",
-    `Frame ${Math.round(time * (frameCount() - 1)) + 1} of ${frameCount()}`,
+    `Frame ${Math.round(time * (model.nFrames - 1)) + 1} of ${model.nFrames}`,
   );
   $("timecode").replaceChildren(
     document.createTextNode(clock(time * duration())),
@@ -51,17 +66,23 @@ function updateTime() {
     }),
   );
 }
-function setPlaying(value, announce = true) {
-  playing = Boolean(value && model && frameCount() > 1 && !loading);
+function setPlaying(value) {
+  playing = Boolean(value && model && model.nFrames > 1 && !loading);
   $("play-toggle").setAttribute("aria-label", playing ? "Pause" : "Play");
   $("play-icon").setAttribute("href", playing ? "#pause" : "#play");
   previousTick = performance.now();
-  if (model && announce) status(playing ? "Playing" : "Paused");
+  wakeControls();
 }
 function seek(value) {
+  if (!model) return;
   time = Math.max(0, Math.min(1, value));
   dirty = true;
   updateTime();
+}
+function fitCamera() {
+  if (!camera) return;
+  if (bookmarkView && source?.url === bookmarkURL) camera.restore(bookmarkView);
+  else camera.fit();
 }
 function connectWorker(data) {
   worker?.terminate();
@@ -75,7 +96,7 @@ function connectWorker(data) {
     const request = pending;
     pending = null;
     if (result.type === "error") {
-      setPlaying(false, false);
+      setPlaying(false);
       status(result.message, "error");
       return;
     }
@@ -85,25 +106,17 @@ function connectWorker(data) {
         result.order,
         request.camera,
         request.time,
-        Number($("sh-degree").value),
-        Number($("resolution").value),
+        model.degree,
+        resolution,
       );
-      $("visible-count").textContent = number(result.order.length);
-      const now = performance.now();
-      if (lastDraw && now - lastDraw < 2000) {
-        const fps = 1000 / (now - lastDraw);
-        smoothFPS = smoothFPS ? smoothFPS * 0.85 + fps * 0.15 : fps;
-        $("render-fps").textContent = `${Math.round(smoothFPS)} fps`;
-      }
-      lastDraw = now;
     } catch (error) {
-      setPlaying(false, false);
+      setPlaying(false);
       status(error.message, "error");
     }
   };
   active.onerror = (event) => {
     pending = null;
-    setPlaying(false, false);
+    setPlaying(false);
     status(`Render worker failed: ${event.message}`, "error");
   };
   active.postMessage(
@@ -128,11 +141,9 @@ async function load(input) {
   loadController = new AbortController();
   const { signal } = loadController;
   loading = true;
-  setPlaying(false, false);
-  status(
-    typeof input === "string" ? "Downloading model…" : "Reading model…",
-    "loading",
-  );
+  setPlaying(false);
+  $("empty").hidden = true;
+  status(typeof input === "string" ? "Downloading…" : "Opening…", "loading");
   try {
     let item = input;
     if (typeof item === "string") {
@@ -150,63 +161,52 @@ async function load(input) {
       };
     }
     const data = await readFTGS(item.blob, {
-      maxPoints: Number($("point-limit").value),
+      maxPoints,
       signal,
       onProgress: (progress) => {
         if (id === generation)
-          status(`Reading model · ${Math.round(progress * 100)}%`, "loading");
+          status(`Opening · ${Math.round(progress * 100)}%`, "loading");
       },
     });
     if (id !== generation) return;
-    status("Preparing scene…", "loading");
     renderer.setModel(data);
     model = {
-      count: data.count,
-      sourceCount: data.sourceCount,
       degree: data.degree,
-      nFrames: data.nFrames,
+      nFrames:
+        Number.isSafeInteger(requestedFrames) && requestedFrames > 0
+          ? requestedFrames
+          : (data.nFrames ?? 300),
     };
     source = item;
     camera.fit(data.bounds);
-    if (bookmarkView && item.url === bookmarkURL) {
-      camera.restore(bookmarkView);
-      $("up-axis").value = camera.upAxis;
-    }
+    if (bookmarkView && item.url === bookmarkURL) camera.restore(bookmarkView);
     connectWorker(data);
-    $("scene-name").textContent = item.name;
-    $("point-count").textContent = number(data.count);
-    $("file-size").textContent =
-      `${(item.blob.size / 1024 / 1024).toFixed(1)} MB`;
-    $("motion").textContent = data.useVelocity
-      ? "Linear velocity"
-      : "Static positions";
-    $("frames").value = data.nFrames ?? 300;
-    $("frame-note").textContent = data.nFrames
-      ? "Frame count from file. Playback rate is adjustable."
-      : "Frame count is absent. Set Frames and Frame rate for playback timing.";
-    $("preview-note").textContent =
-      data.count < data.sourceCount
-        ? `Preview: showing ${number(data.count)} of ${number(data.sourceCount)} Gaussians. Choose All points for full detail.`
-        : "All Gaussians loaded.";
-    $("sh-degree").replaceChildren(
-      ...Array.from(
-        { length: data.degree + 1 },
-        (_, i) => new Option(String(i), String(i), false, i === data.degree),
-      ),
+    document.title = `${item.name} · FTGS Player`;
+    $("canvas").setAttribute(
+      "aria-label",
+      `${item.name}. Drag to orbit, Shift-drag to pan, scroll to zoom.`,
     );
-    $("demo-label").hidden = !item.demo;
-    for (const name of ["play-toggle", "timeline", "restart"])
-      $(name).disabled = false;
+    $("viewer").dataset.loaded = "true";
+    $("controls").hidden = false;
+    $("play-toggle").disabled = model.nFrames === 1;
+    $("timeline").disabled = model.nFrames === 1;
     loading = false;
-    lastDraw = 0;
-    smoothFPS = 0;
     seek(0);
     setPlaying(true);
-    dirty = true;
+    const notice =
+      data.count < data.sourceCount
+        ? `Previewing ${data.count.toLocaleString()} of ${data.sourceCount.toLocaleString()} Gaussians.`
+        : item.demo
+          ? "Synthetic demo"
+          : "";
+    status(notice, "ready", 5000);
+    $("canvas").focus({ preventScroll: true });
   } catch (error) {
     if (id !== generation || error.name === "AbortError") return;
     loading = false;
     dirty = true;
+    // The file button remains available when the very first load fails.
+    $("controls").hidden = false;
     status(
       error instanceof TypeError
         ? "Unable to load URL. Check the address, connection, and the host's CORS settings."
@@ -221,14 +221,7 @@ function tick(now) {
   previousTick = now;
   if (model && !loading) {
     if (playing) {
-      time += (elapsed / duration()) * Number($("speed").value);
-      if (time >= 1) {
-        if (loop) time %= 1;
-        else {
-          time = 1;
-          setPlaying(false);
-        }
-      }
+      time = (time + elapsed / duration()) % 1;
       dirty = true;
       updateTime();
     }
@@ -246,40 +239,20 @@ function tick(now) {
   raf = requestAnimationFrame(tick);
 }
 
-$("open-file").onclick = () => $("file").click();
+for (const id of ["empty", "open-file"])
+  $(id).onclick = () => $("file").click();
 $("file").onchange = () => {
   const file = $("file").files[0];
   if (file) void load({ blob: file, name: file.name });
   $("file").value = "";
 };
-$("demo").onclick = () =>
-  void load({ blob: demoFile(), name: "Kinetic ribbon", demo: true });
-$("url-open").onclick = () => $("url-dialog").showModal();
-$("url-close").onclick = () => $("url-dialog").close();
-$("url-form").onsubmit = (event) => {
-  event.preventDefault();
-  $("url-dialog").close();
-  void load($("model-url").value.trim());
-};
 $("play-toggle").onclick = () => {
   if (!playing && time === 1) seek(0);
   setPlaying(!playing);
 };
-$("restart").onclick = () => seek(0);
 $("timeline").oninput = () => {
   setPlaying(false);
   seek(Number($("timeline").value));
-};
-$("loop-toggle").onclick = () => {
-  loop = !loop;
-  $("loop-toggle").classList.toggle("active", loop);
-  $("loop-toggle").setAttribute("aria-pressed", String(loop));
-};
-$("fit-camera").onclick = () => {
-  if (bookmarkView && source?.url === bookmarkURL) {
-    camera.restore(bookmarkView);
-    $("up-axis").value = camera.upAxis;
-  } else camera?.fit();
 };
 $("fullscreen").onclick = async () => {
   try {
@@ -289,64 +262,46 @@ $("fullscreen").onclick = async () => {
     status("Fullscreen is unavailable in this browser.", "error");
   }
 };
-$("details-toggle").onclick = () => {
-  $("details").hidden = !$("details").hidden;
-  $("details-toggle").setAttribute(
-    "aria-expanded",
-    String(!$("details").hidden),
-  );
-};
-$("point-limit").onchange = () => {
-  if (source) void load(source);
-};
-for (const name of ["sh-degree", "resolution"])
-  $(name).onchange = () => {
-    dirty = true;
-  };
-$("up-axis").onchange = () => {
-  if (camera) {
-    camera.upAxis = $("up-axis").value;
-    camera.fit();
-  }
-};
-for (const name of ["fps", "frames"])
-  $(name).onchange = () => {
-    if (name === "frames")
-      $("frames").value = Math.max(
-        1,
-        Math.min(1000000, Math.round(frameCount())),
-      );
-    if (frameCount() === 1) {
-      seek(0);
-      setPlaying(false);
-    }
-    updateTime();
-  };
+// Mouse clicks need not keep the bar focused; keyboard focus keeps it visible.
+$("controls").addEventListener("click", (event) => {
+  if (event.detail > 0) event.target.closest("button")?.blur();
+});
+for (const name of ["pointermove", "pointerdown"])
+  $("viewer").addEventListener(name, wakeControls);
 window.addEventListener("keydown", (event) => {
   if (
     event.ctrlKey ||
     event.metaKey ||
     event.altKey ||
-    $("url-dialog").open ||
     ["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(event.target.tagName)
   )
     return;
+  wakeControls();
   if (event.code === "Space") {
     event.preventDefault();
     $("play-toggle").click();
-  } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+  } else if (model && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
     event.preventDefault();
     setPlaying(false);
     seek(
       time +
-        (event.key === "ArrowRight" ? 1 : -1) / Math.max(1, frameCount() - 1),
+        (event.key === "ArrowRight" ? 1 : -1) / Math.max(1, model.nFrames - 1),
     );
-  } else if (event.key.toLowerCase() === "r") $("fit-camera").click();
+  } else if (event.key.toLowerCase() === "r") fitCamera();
   else if (event.key.toLowerCase() === "f") $("fullscreen").click();
+  else if (event.key.toLowerCase() === "o") $("file").click();
+  else if (event.key.toLowerCase() === "u" && camera) {
+    camera.upAxis = camera.upAxis === "y" ? "z" : "y";
+    camera.fit();
+    status(`${camera.upAxis.toUpperCase()} up`, "ready", 1500);
+  }
 });
 window.addEventListener("dragover", (event) => {
   event.preventDefault();
-  if (event.dataTransfer.types.includes("Files")) $("drop-hint").hidden = false;
+  if (event.dataTransfer.types.includes("Files")) {
+    event.dataTransfer.dropEffect = "copy";
+    $("drop-hint").hidden = false;
+  }
 });
 window.addEventListener("dragleave", (event) => {
   if (!event.relatedTarget) $("drop-hint").hidden = true;
@@ -357,22 +312,18 @@ window.addEventListener("drop", (event) => {
   const file = event.dataTransfer.files[0];
   if (file) void load({ blob: file, name: file.name });
 });
+window.addEventListener("blur", () => {
+  $("drop-hint").hidden = true;
+});
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) setPlaying(false);
 });
 $("canvas").addEventListener("webglcontextlost", (event) => {
   event.preventDefault();
   loading = true;
-  setPlaying(false, false);
-  status(
-    "Graphics context lost. Refresh the page and choose a smaller point limit.",
-    "error",
-  );
+  setPlaying(false);
+  status("Graphics context lost. Reload the page to continue.", "error");
 });
-if (matchMedia("(max-width: 720px)").matches) {
-  $("details").hidden = true;
-  $("details-toggle").setAttribute("aria-expanded", "false");
-}
 const resize = new ResizeObserver(() => {
   dirty = true;
 });
@@ -382,6 +333,8 @@ window.addEventListener("pagehide", (event) => {
   generation++;
   loadController?.abort();
   cancelAnimationFrame(raf);
+  clearTimeout(idleTimer);
+  clearTimeout(messageTimer);
   worker?.terminate();
   camera?.destroy();
   renderer?.destroy();
@@ -392,17 +345,18 @@ try {
   camera = new OrbitCamera($("canvas"), () => {
     dirty = true;
   });
+  camera.upAxis = query.get("up") === "z" ? "z" : "y";
   raf = requestAnimationFrame(tick);
-  const query = new URLSearchParams(location.search);
   const url = query.get("src");
-  if (["24", "30", "60"].includes(query.get("fps")))
-    $("fps").value = query.get("fps");
   if (url && query.has("view")) {
     bookmarkView = JSON.parse(query.get("view"));
     camera.restore(bookmarkView);
     bookmarkURL = new URL(url, location.href).href;
   }
-  void load(url || { blob: demoFile(), name: "Kinetic ribbon", demo: true });
+  if (url) void load(url);
+  else if (query.get("demo") === "1")
+    void load({ blob: demoFile(), name: "Kinetic ribbon", demo: true });
 } catch (error) {
+  $("empty").hidden = true;
   status(error.message, "error");
 }

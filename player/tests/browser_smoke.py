@@ -46,9 +46,23 @@ def main():
 
     def ready(page):
         page.wait_for_function(
-            "document.querySelector('#message').dataset.state === 'ready' && "
-            "document.querySelector('#visible-count').textContent !== '—'"
+            "document.querySelector('#viewer').dataset.state === 'ready' && "
+            "document.querySelector('#viewer').dataset.loaded === 'true'"
         )
+
+    def drop_demo(page):
+        transfer = page.evaluate_handle("""async () => {
+          const {demoFile} = await import('/demo.js');
+          const transfer = new DataTransfer();
+          transfer.items.add(new File([demoFile()], 'ribbon.ftgs.ply'));
+          return transfer;
+        }""")
+        page.dispatch_event("#viewer", "dragover", {"dataTransfer": transfer})
+        assert page.locator("#drop-hint").is_visible()
+        page.dispatch_event("#viewer", "drop", {"dataTransfer": transfer})
+        ready(page)
+        assert not page.locator("#drop-hint").is_visible()
+        transfer.dispose()
 
     def seek(page, t):
         page.locator("#timeline").evaluate(
@@ -81,7 +95,24 @@ def main():
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
             page.goto(url)
-            ready(page)
+            assert page.locator("#empty").is_visible()
+            assert not page.locator("#controls").is_visible()
+            assert page.locator("header, aside, footer").count() == 0
+            if args.screenshots:
+                page.screenshot(path=args.screenshots / "empty.png")
+            # Check initial-file failure leaves an accessible way to try again.
+            with page.expect_file_chooser() as chooser:
+                page.locator("#empty").click()
+            chooser.value.set_files({"name": "invalid.ftgs.ply", "mimeType": "application/octet-stream", "buffer": b"invalid"})
+            page.wait_for_function("document.querySelector('#viewer').dataset.state === 'error'")
+            assert page.locator("#open-file").is_visible()
+            drop_demo(page)
+            assert not page.locator("#empty").is_visible()
+            assert page.locator("#play-toggle").get_attribute("aria-label") == "Pause"
+            page.mouse.move(100, 100)
+            page.wait_for_function("getComputedStyle(document.querySelector('#controls')).opacity === '0'", timeout=6000)
+            page.mouse.move(110, 110)
+            page.wait_for_function("getComputedStyle(document.querySelector('#controls')).opacity === '1'")
             projection = page.evaluate("""async () => {
               const {SplatRenderer} = await import('/renderer.js');
               const canvas = document.createElement('canvas');
@@ -127,45 +158,27 @@ def main():
             before = float(page.locator("#timeline").input_value())
             page.keyboard.press("ArrowRight")
             assert float(page.locator("#timeline").input_value()) > before
-            page.locator("#fit-camera").click()
-            page.locator("#frames").fill("6")
-            page.locator("#frames").dispatch_event("change")
-            page.locator("#speed").select_option("2")
-            page.locator("#loop-toggle").click()
-            seek(page, 0.9)
+            page.keyboard.press("r")
+            seek(page, 0.99)
             page.locator("#play-toggle").click()
-            page.wait_for_function("document.querySelector('#timeline').value === '1'")
-            assert page.locator("#play-toggle").get_attribute("aria-label") == "Play"
-            page.locator("#loop-toggle").click()
-            page.locator("#play-toggle").click()
-            page.wait_for_timeout(500)
+            page.wait_for_function("Number(document.querySelector('#timeline').value) < 0.5")
             assert page.locator("#play-toggle").get_attribute("aria-label") == "Pause"
             page.locator("#file").set_input_files(
                 {"name": "invalid.ftgs.ply", "mimeType": "application/octet-stream", "buffer": b"invalid"}
             )
-            page.wait_for_function("document.querySelector('#message').dataset.state === 'error'")
-            assert "header" in page.locator("#message-text").inner_text()
-            page.locator("#demo").click()
-            ready(page)
+            page.wait_for_function("document.querySelector('#viewer').dataset.state === 'error'")
+            assert "header" in page.locator("#message").inner_text()
+            drop_demo(page)
             if args.model:
-                page.locator("#file").set_input_files(args.model)
-                page.wait_for_function("document.querySelector('#scene-name').textContent === "
-                                       + repr(args.model.name))
+                with page.expect_file_chooser() as chooser:
+                    page.locator("#open-file").click()
+                chooser.value.set_files(args.model)
+                page.wait_for_function("name => document.title.startsWith(name)", arg=args.model.name)
                 ready(page)
-                page.locator("#point-limit").select_option("Infinity")
+                page.goto(f"{url}/?src=/test-model.ftgs.ply&points=all")
                 ready(page)
-                page.locator("#url-open").click()
-                page.locator("#model-url").fill(f"{url}/test-model.ftgs.ply")
-                page.locator("#url-form button[type=submit]").click()
-                page.wait_for_function(
-                    "document.querySelector('#scene-name').textContent === 'test-model.ftgs.ply'"
-                )
-                ready(page)
-                page.goto(f"{url}/?src=/test-model.ftgs.ply")
-                ready(page)
-                assert page.locator("#scene-name").inner_text() == "test-model.ftgs.ply"
-                page.locator("#demo").click()
-                ready(page)
+                assert page.title().startswith("test-model.ftgs.ply")
+                drop_demo(page)
             seek(page, 0.3)
             assert page.locator("#canvas").evaluate("c => c.getContext('webgl2').getError()") == 0
             if args.screenshots:
@@ -173,14 +186,11 @@ def main():
             mobile = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
             mobile.on("pageerror", lambda error: errors.append(str(error)))
             mobile.goto(url)
-            ready(mobile)
+            assert mobile.locator("#empty").is_visible()
+            drop_demo(mobile)
             seek(mobile, 0.3)
             assert mobile.evaluate("document.documentElement.scrollWidth") == 390
-            assert mobile.locator("#canvas").bounding_box()["height"] > 600
-            assert not mobile.locator("#details").is_visible()
-            mobile.locator("#details-toggle").click()
-            assert mobile.locator("#details").is_visible()
-            mobile.locator("#details-toggle").click()
+            assert mobile.locator("#canvas").bounding_box()["height"] == 844
             if args.screenshots:
                 mobile.screenshot(path=args.screenshots / "mobile.png")
             assert not errors, errors

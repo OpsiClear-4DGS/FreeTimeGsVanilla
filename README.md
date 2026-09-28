@@ -350,17 +350,18 @@ results/
 ## Browser player for FTGS files
 
 The standalone [FTGS Player](player/README.md) opens `.ftgs.ply` files locally or
-from a URL and runs entirely in the browser with WebGL2. It includes playback,
-seeking, speed and loop controls, orbit/pan/zoom, and a synthetic demo. It runs as a static site
+from a URL and runs entirely in the browser with WebGL2. Drop a file to play it
+in a full-window canvas with a small playback bar that fades when idle. It supports
+seeking, automatic looping and orbit/pan/zoom. It runs as a static site
 without a build step or package installation.
 
 ```bash
 python -m http.server 8765 --bind 127.0.0.1 --directory player
 ```
 
-Open <http://localhost:8765> and choose **Open file** or drop in an exported
+Open <http://localhost:8765> and click to open a file or drop in an exported
 `.ftgs.ply`. Local files stay in the browser. The default preview loads up to
-1 million Gaussians; choose **All points** for full detail when GPU memory allows.
+1 million Gaussians; use `?points=all` for full detail when GPU memory allows.
 See the [player documentation](player/README.md) for format support, controls,
 rendering limits, and tests.
 

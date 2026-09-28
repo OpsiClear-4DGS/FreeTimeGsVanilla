@@ -10,10 +10,14 @@ From the repository root:
 python -m http.server 8765 --bind 127.0.0.1 --directory player
 ```
 
-Open <http://localhost:8765>. A clearly labeled synthetic scene plays immediately.
-Use **Open file** or drag a `.ftgs.ply` onto the player. Local files stay in the
-browser. Serve the page over HTTP; opening `index.html` directly cannot load its
-modules and worker.
+Open <http://localhost:8765> and drop a `.ftgs.ply` anywhere, or click the empty
+player to choose a file. Playback starts automatically and loops. The scene fills
+the window; a small playback bar fades out when idle and returns on movement or
+touch. There are no headers, statistics panels or settings dashboards. The folder
+button opens another file. Local files stay in the browser.
+
+Serve the page over HTTP; opening `index.html` directly cannot load its modules
+and worker. The synthetic test scene is available explicitly at `/?demo=1`.
 
 Export a trained checkpoint first if needed:
 
@@ -21,10 +25,10 @@ Export a trained checkpoint first if needed:
 python src/export_ftgs_ply.py --ckpt path/to/checkpoint.pt --output scene.ftgs.ply
 ```
 
-**Load URL** accepts HTTP(S) model URLs. The model host must allow cross-origin
-requests when it is on a different origin. You can also link directly with
-`?src=` followed by a URL-encoded model address. The page can be hosted as static
-files; it has no application server, analytics, or remote assets.
+To load an HTTP(S) model URL, link with `?src=` followed by its URL-encoded address.
+The model host must allow cross-origin requests when it is on a different origin.
+The page can be hosted as static files; it has no application server, analytics,
+or remote assets.
 
 For a captured scene, a camera inside the capture area can give a much better
 initial view than fitting all points. A model link can include `fps=24`, `30` or
@@ -40,7 +44,7 @@ const query = new URLSearchParams({
 ```
 
 `up` is `y` or `z`; `fov` is the vertical field of view in degrees (10–120).
-Fit / R restores this bookmarked view for its model. These are player settings;
+R restores this bookmarked view for its model. These are player settings;
 the FTGS file itself does not store capture cameras or frame rate.
 
 ## Controls
@@ -49,16 +53,17 @@ the FTGS file itself does not store capture cameras or frame rate.
 | --- | --- |
 | Play / pause | Play button or Space |
 | Seek / step | Timeline, or Left / Right for one frame |
-| Playback speed / loop | Speed menu and loop button |
+| Open another file | Folder button, O, or drop anywhere |
 | Orbit | Left drag / one-finger drag |
 | Pan | Right drag, Shift + drag, or two-finger drag |
 | Zoom | Scroll / pinch |
-| Fit camera | Fit button or R |
+| Fit camera / restore saved view | R |
+| Switch Y up / Z up | U |
 | Fullscreen | Fullscreen button or F |
 
-The settings button opens scene information and quality controls. Shortcuts apply
-when the canvas or page has focus, leaving form controls' keys available normally.
-Use **Y up / Z up** for different reconstruction coordinate systems.
+Shortcuts apply when the canvas or page has focus, leaving form controls' keys
+available normally. The controls remain visible while paused or focused with the
+keyboard.
 
 ## Format and rendering
 
@@ -71,15 +76,17 @@ and `.pt` checkpoints are not inputs to this player.
 
 The frame count comes from `n_frames` when present. Playback defaults to 30 fps,
 which is a player setting rather than information stored in FTGS v1. For files
-without a frame count, the editable default is 300. Frame `i` maps to normalized
-time `i / max(n_frames - 1, 1)`.
+without a frame count, the default is 300; `?frames=120` overrides it. Frame `i`
+maps to normalized time `i / max(n_frames - 1, 1)`.
 
 The default point limit is **1 million**, sampled evenly throughout the file.
-The information panel reports loaded and source counts when sampling is active.
-Choose **All points** for the complete model, or lower the point limit / render
-resolution on smaller GPUs. Large files still need enough browser memory to
-load the file and its selected points; this version does not stream models.
-GPU texture limits and available memory may prevent very large models loading.
+A brief loading notice reports when sampling is active. URL options keep the
+view free of settings panels: `?points=all` loads the complete model,
+`?points=250000` lowers the limit, `?resolution=half` lowers render resolution,
+and `?up=z` starts with Z up. Combine options with `&` after the first `?`.
+Large files still need enough browser memory to load the file and its selected
+points; this version does not stream models. GPU texture limits and available
+memory may prevent very large models loading.
 
 This is a preview renderer, not a pixel-identical implementation of the CUDA
 trainer. Depth sorting uses 65,536 bins; the rasterizer truncates Gaussians at

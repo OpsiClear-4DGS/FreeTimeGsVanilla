@@ -1,7 +1,8 @@
 # Embedding the FTGS player
 
 Use `FTGSPlayer` for a canvas inside your own UI, or `FTGSEmbed` to control the
-standalone page in an iframe. Both support loading files, playback, seeking,
+standalone page in an iframe. Both support loading `.ftgs.ply` and packaged `.tsog`
+files, playback, seeking,
 events, and cleanup. Neither needs a runtime package or a build step.
 
 Runnable examples: [canvas](examples/embedding.html) ·
@@ -58,8 +59,8 @@ Constructor options:
 | --- | --- | --- |
 | `autoplay` | `true` | Start after loading, when the document is visible. |
 | `loop` | `true` | Repeat playback; otherwise stop at the end. |
-| `fps` | `30` | Positive playback frame rate. |
-| `frames` | File metadata, or `300` | Override the frame count with a positive integer. |
+| `fps` | `null` | Use package FPS, or 30 if absent. A positive number overrides it. |
+| `frames` | File metadata, or `300` | Override continuous display frame count. Discrete/static TSOG keeps its native frame count. |
 | `maxPoints` | `1000000` | Positive point limit, or `Infinity` for all points. |
 | `resolution` | `1` | Render scale greater than zero and at most one. |
 | `up` | `"y"` | Camera up axis: `"y"` or `"z"`. |
@@ -89,12 +90,21 @@ can recover. `play()`, `pause()`, and valid `seek()` calls do nothing before a
 model is loaded.
 
 `player.state` is a snapshot with `status`, `loaded`, `playing`, `time`,
-`currentTime`, `duration`, `fps`, `loop`, `nFrames`, `name`, `pointCount`,
+`currentTime`, `duration`, `fps`, `loop`, `nFrames`, `frameIndex`, `format`, `timeline`,
+`name`, `pointCount`,
 `sourceCount`, `progress`, `error`, and `ar`. `time` is normalized; `currentTime` and
 `duration` are seconds. `progress` is parsing progress from zero to one, not
 download progress. `error` is a message or `null`. Status is `empty`, `loading`,
 `ready`, `error`, or `destroyed`. The canvas API also has read-only `time`,
-`playing`, and `duration` getters.
+`playing`, `duration`, `fps`, and `frameIndex` getters.
+
+`format` is `"ftgs-ply"`, `"tsog"`, or `null` before loading. `timeline` is
+`"continuous"`, `"discrete"`, `"static"`, or `null`. `frameIndex` is zero-based.
+For discrete TSOG, duration is `nFrames / fps` and `seek(t)` selects
+`min(nFrames - 1, floor(t * nFrames))`; the last frame gets a full playback
+interval. Continuous models keep their existing normalized-time playback.
+Omit `fps` to honor package metadata. See [TSOG.md](TSOG.md) for supported
+encodings, the original paper/repository, and timing assumptions.
 
 Subscribe with `addEventListener`. Every event's `detail` contains a state snapshot:
 `loadstart`, `progress`, `loaded`, `play`, `pause`, `timeupdate`, `ended`, `abort`,
@@ -236,7 +246,10 @@ export function FTGSCanvas({ source }) {
 ```
 
 Vue and other frameworks can use the same mount/destroy lifecycle. For direct
-canvas hosting, retain `player.js`, `ftgs.js`, `camera.js`, `renderer.js`, `xr.js`,
-`sort-worker.js`, and `sort.js` together, or let your bundler process their module
-and worker URLs. Self-host these modules with your application so the module
+canvas hosting, retain `player.js`, `model.js`, `ftgs.js`, `tsog.js`, `zip.js`,
+`webp.js`, `camera.js`, `renderer.js`, `xr.js`, `sort-worker.js`, and `sort.js`
+together, or let your bundler process their module and worker URLs. Self-host these modules with your application so the module
 worker can load from the same origin. WebGL2 and adequate GPU memory are required.
+
+When redistributing the player modules, include the repository license and
+[THIRD_PARTY.md](THIRD_PARTY.md), which preserves TSOG and PlayCanvas notices.

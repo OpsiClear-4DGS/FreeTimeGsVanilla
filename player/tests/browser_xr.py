@@ -125,6 +125,24 @@ def main():
             }''')
             print("PASS: stereo pixels, transparent background, asymmetric projections, live tracking with slow sorting, animation/seek, surface placement and desktop restoration", flush=True)
             page.evaluate('''async () => {
+              for (const name of ['continuous16', 'discrete']) {
+                await player.load('./tests/fixtures/tsog/' + name + '.tsog');
+                player.seek(.5);
+                await wait();
+                await player.enterAR();
+                xr.session.step(); await wait(); xr.session.step();
+                check(xr.pixels().count.every(n => n > 100), name + ' TSOG is blank in AR');
+                check(xr.draws.at(-1).time === (name === 'discrete' ? 2 : .5), 'TSOG XR timeline mismatch');
+                player.seek(1);
+                xr.session.step(); await wait(); xr.session.step(); await wait(); xr.session.step();
+                check(xr.draws.at(-1).time === (name === 'discrete' ? 3 : 1), 'TSOG XR seek mismatch');
+                await player.exitAR();
+              }
+              await player.load(demo);
+              await wait();
+            }''')
+            print("PASS: continuous and discrete packaged TSOG stereo rendering and seeking in AR", flush=True)
+            page.evaluate('''async () => {
               xr.reject = true;
               try { await player.enterAR(); throw new Error('Permission denial was ignored'); }
               catch (error) { check(error.name === 'NotAllowedError', error.message); }

@@ -12,12 +12,12 @@ export function mountPlayerShell(viewer) {
       </defs>
     </svg>
     <canvas id="canvas" tabindex="0" aria-label="3D scene. Drag to orbit, Shift-drag to pan, scroll to zoom. WASD to move, Q/E down/up, Shift to move faster."></canvas>
-    <button id="empty" class="empty" aria-label="Choose a .ftgs.ply file">
+    <button id="empty" class="empty" aria-label="Choose a .ftgs.ply or .tsog file">
       <span class="empty-icon"><svg aria-hidden="true"><use href="#play" /></svg></span>
-      <span class="empty-title">Drop a .ftgs.ply to play</span>
+      <span class="empty-title">Drop a .ftgs.ply or .tsog to play</span>
       <span class="empty-caption">or click to open a file</span>
     </button>
-    <input id="file" type="file" accept=".ply" hidden aria-label="Open FTGS file" />
+    <input id="file" type="file" accept=".ply,.tsog" hidden aria-label="Open splat file" />
     <div id="message" class="message" role="status" hidden></div>
     <div id="ar-hint" class="message ar-hint" role="status" hidden></div>
     <div id="drop-hint" class="drop-hint" hidden>

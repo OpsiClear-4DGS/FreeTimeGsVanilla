@@ -1,6 +1,6 @@
-import { readFTGS } from "./ftgs.js?v=4";
+import { readModel } from "./model.js?v=5";
 import { OrbitCamera, validateCameraView } from "./camera.js?v=4";
-import { SplatRenderer } from "./renderer.js?v=4";
+import { SplatRenderer } from "./renderer.js?v=5";
 import { ARPresentation, isARSupported } from "./xr.js?v=4";
 
 export const PLAYER_EVENTS = Object.freeze([
@@ -57,7 +57,7 @@ export class FTGSPlayer extends EventTarget {
     {
       autoplay = true,
       loop = true,
-      fps = 30,
+      fps = null,
       maxPoints = 1000000,
       resolution = 1,
       frames = null,
@@ -69,7 +69,7 @@ export class FTGSPlayer extends EventTarget {
       throw new TypeError("FTGSPlayer needs a canvas element.");
     if (owners.has(canvas))
       throw new Error("This canvas already has a player.");
-    if (!Number.isFinite(fps) || fps <= 0)
+    if (fps !== null && (!Number.isFinite(fps) || fps <= 0))
       throw new RangeError("fps must be a positive number.");
     if (
       maxPoints !== Infinity &&
@@ -145,10 +145,20 @@ export class FTGSPlayer extends EventTarget {
   get playing() {
     return this.#playing;
   }
+  get fps() {
+    return this.#options.fps ?? this.#model?.fps ?? 30;
+  }
+  get frameIndex() {
+    if (!this.#model) return 0;
+    const { nFrames, timelineMode } = this.#model;
+    return timelineMode === 1
+      ? Math.min(nFrames - 1, Math.floor(this.#time * nFrames))
+      : Math.round(this.#time * (nFrames - 1));
+  }
   get duration() {
-    return this.#model
-      ? Math.max(1, this.#model.nFrames - 1) / this.#options.fps
-      : 0;
+    if (!this.#model) return 0;
+    const { nFrames, timelineMode } = this.#model;
+    return Math.max(1, nFrames - (timelineMode === 1 ? 0 : 1)) / this.fps;
   }
   get state() {
     return {
@@ -158,9 +168,13 @@ export class FTGSPlayer extends EventTarget {
       time: this.#time,
       currentTime: this.#time * this.duration,
       duration: this.duration,
-      fps: this.#options.fps,
+      fps: this.fps,
       loop: this.#options.loop,
       nFrames: this.#model?.nFrames ?? 0,
+      frameIndex: this.frameIndex,
+      format: this.#model?.format ?? null,
+      timeline: this.#model
+        ? ["continuous", "discrete", "static"][this.#model.timelineMode] : null,
       name: this.#model?.name ?? "",
       pointCount: this.#model?.count ?? 0,
       sourceCount: this.#model?.sourceCount ?? 0,
@@ -240,7 +254,7 @@ export class FTGSPlayer extends EventTarget {
         throw new TypeError("name must be a string.");
       // Validate a saved view before replacing a working model or camera.
       if (view !== null) view = validateCameraView(view);
-      const data = await readFTGS(blob, {
+      const data = await readModel(blob, {
         maxPoints: this.#options.maxPoints,
         signal: controller.signal,
         onProgress: (progress) => {
@@ -251,7 +265,7 @@ export class FTGSPlayer extends EventTarget {
       });
       controller.signal.throwIfAborted();
       if (generation !== this.#generation) throw aborted();
-      const worker = new Worker(new URL("./sort-worker.js", import.meta.url), {
+      const worker = new Worker(new URL("./sort-worker.js?v=5", import.meta.url), {
         type: "module",
       });
       try {
@@ -264,7 +278,11 @@ export class FTGSPlayer extends EventTarget {
       this.#model = {
         name: name ?? blob.name ?? "FTGS model",
         degree: data.degree,
-        nFrames: this.#options.frames ?? data.nFrames ?? 300,
+        nFrames: data.timelineMode === 0
+          ? this.#options.frames ?? data.nFrames ?? 300 : data.nFrames,
+        fps: data.fps,
+        format: data.format,
+        timelineMode: data.timelineMode,
         count: data.count,
         sourceCount: data.sourceCount,
       };
@@ -437,6 +455,7 @@ export class FTGSPlayer extends EventTarget {
           alpha: data.alpha,
           useVelocity: data.useVelocity,
           opacityFloor: data.opacityFloor,
+          timelineMode: data.timelineMode,
         },
       },
       [
@@ -507,9 +526,11 @@ export class FTGSPlayer extends EventTarget {
   #sort(camera, xr = false) {
     if (this.#pending || !this.#worker) return;
     this.#dirty = false;
-    this.#pending = { time: this.#time, camera, revision: this.#revision, xr };
+    // Select discrete frames once, on the CPU, so shader and sorter agree at boundaries.
+    const time = this.#model.timelineMode === 1 ? this.frameIndex : this.#time;
+    this.#pending = { time, camera, revision: this.#revision, xr };
     this.#worker.postMessage({
-      type: "sort", time: this.#time, view: camera.view,
+      type: "sort", time, view: camera.view,
       // Retain behind-camera centers in XR: a newer tracked pose can reveal them
       // before the next asynchronous sort. Each eye clips its own near plane.
       near: xr ? -Infinity : camera.near,

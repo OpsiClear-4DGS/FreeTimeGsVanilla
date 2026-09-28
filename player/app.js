@@ -1,14 +1,13 @@
-import { FTGSPlayer } from "./player.js?v=4";
-import { attachPlayerBridge } from "./bridge.js?v=4";
+import { FTGSPlayer } from "./player.js?v=5";
+import { attachPlayerBridge } from "./bridge.js?v=5";
 import { demoFile } from "./demo.js";
-import { mountPlayerShell } from "./shell.js?v=4";
+import { mountPlayerShell } from "./shell.js?v=5";
 
 mountPlayerShell(document.getElementById("viewer"));
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
-const fps = [24, 30, 60].includes(Number(query.get("fps")))
-  ? Number(query.get("fps"))
-  : 30;
+const requestedFps = Number(query.get("fps"));
+const fps = Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : null;
 const requestedPoints = Number(query.get("points"));
 const maxPoints =
   query.get("points") === "all"
@@ -76,7 +75,7 @@ function updateTime(state) {
   $("timeline").style.setProperty("--progress", `${state.time * 100}%`);
   $("timeline").setAttribute(
     "aria-valuetext",
-    `Frame ${Math.round(state.time * (state.nFrames - 1)) + 1} of ${state.nFrames}`,
+    `Frame ${state.frameIndex + 1} of ${state.nFrames}`,
   );
   $("timecode").replaceChildren(
     document.createTextNode(clock(state.currentTime)),
@@ -363,9 +362,8 @@ try {
         event.preventDefault();
         player.pause();
         player.seek(
-          player.time +
-            (event.key === "ArrowRight" ? 1 : -1) /
-              Math.max(1, player.state.nFrames - 1),
+          (player.frameIndex + (event.key === "ArrowRight" ? 1 : -1)) /
+            Math.max(1, player.state.nFrames - 1),
         );
       } else if (event.key.toLowerCase() === "r") player.fitCamera();
       else if (event.key.toLowerCase() === "f" && player.state.ar.status === "inactive") $("fullscreen").click();

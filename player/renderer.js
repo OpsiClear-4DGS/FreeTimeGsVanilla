@@ -11,7 +11,7 @@ uniform mat4 view, projection;
 uniform vec3 eye;
 uniform vec2 viewport, focal;
 uniform float time, nearPlane, opacityFloor;
-uniform int coefficients, shDegree;
+uniform int coefficients, shDegree, timelineMode;
 uniform bool useVelocity;
 out vec2 gaussian;
 flat out vec4 color;
@@ -44,10 +44,11 @@ void main() {
   int id=int(splatId);
   vec4 p=load(positions,id), v=load(velocities,id), a=load(covarianceA,id), b=load(covarianceB,id);
   float dt=time-p.w;
-  vec3 world=p.xyz+(useVelocity ? v.xyz*dt : vec3(0.0));
+  vec3 world=p.xyz+(useVelocity && timelineMode==0 ? v.xyz*dt : vec3(0.0));
   vec3 center=(view*vec4(world,1.0)).xyz;
   float depth=-center.z;
-  float opacity=max(opacityFloor,b.z*exp(-0.5*(dt/v.w)*(dt/v.w)));
+  float opacity=timelineMode==1 ? (time==p.w ? b.z : 0.0) :
+    timelineMode==2 ? b.z : max(opacityFloor,b.z*exp(-0.5*(dt/v.w)*(dt/v.w)));
   gaussian=corner; color=vec4(0.0);
   if(depth<=nearPlane || opacity<1.0/255.0) { gl_Position=vec4(2.0,2.0,0.0,1.0); return; }
   mat3 C=mat3(a.x,a.y,a.z, a.y,a.w,b.x, a.z,b.x,b.y);
@@ -138,6 +139,7 @@ export class SplatRenderer {
         "coefficients",
         "shDegree",
         "useVelocity",
+        "timelineMode",
       ].map((name) => [name, gl.getUniformLocation(this.program, name)]),
     );
     this.vao = gl.createVertexArray();
@@ -233,6 +235,7 @@ export class SplatRenderer {
     this.coefficients = model.coefficients;
     this.useVelocity = model.useVelocity;
     this.opacityFloor = model.opacityFloor;
+    this.timelineMode = model.timelineMode ?? 0;
   }
   beginXRFrame(layer) {
     const gl = this.gl;
@@ -288,6 +291,7 @@ export class SplatRenderer {
     gl.uniform1i(u.coefficients, this.coefficients);
     gl.uniform1i(u.shDegree, degree);
     gl.uniform1i(u.useVelocity, this.useVelocity ? 1 : 0);
+    gl.uniform1i(u.timelineMode, this.timelineMode);
     gl.uniform1f(u.opacityFloor, this.opacityFloor);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.order);
     if (this.lastOrder !== order) {

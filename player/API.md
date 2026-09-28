@@ -2,8 +2,8 @@
 
 Use `FTGSPlayer` for a canvas inside your own UI, or `FTGSEmbed` to control the
 standalone page in an iframe. Both support loading `.ftgs.ply` and packaged `.tsog`
-files, playback, seeking,
-events, and cleanup. Neither needs a runtime package or a build step.
+files, playback, seeking, embedded TSOG audio, speed/volume controls, events,
+and cleanup. Neither needs a runtime package or a build step.
 
 Runnable examples: [canvas](examples/embedding.html) ·
 [iframe](examples/embedding.html?mode=iframe). Both use generated demo data.
@@ -27,15 +27,14 @@ keyboard shortcuts, or style your page. Multiple canvases work independently.
 
   const player = new FTGSPlayer(document.querySelector("#scene"), {
     autoplay: false,
-    loop: true,
-    fps: 30,
+    // Omit timing, speed, loop and volume overrides to honor file defaults.
   });
   player.addEventListener("timeupdate", ({ detail }) => {
     console.log(detail.time, detail.currentTime, detail.duration);
   });
   player.addEventListener("error", ({ detail }) => console.error(detail.error));
 
-  await player.load("./assets/scene.ftgs.ply"); // Also accepts a File or Blob.
+  await player.load("./assets/scene.tsog"); // Also accepts .ftgs.ply, File or Blob.
   player.seek(0.5); // Normalized time: 0 = start, 1 = end.
   player.play();
   // player.pause();
@@ -63,7 +62,7 @@ Constructor options:
 | `playbackRate` | `null` | Use package speed, or 1 if absent. A number from 0.25 to 4 overrides it. |
 | `volume` | `null` | Use package audio volume, or 1 if absent. A number from 0 to 1 overrides it. |
 | `muted` | `false` | Start with audio muted when true. |
-| `frames` | File metadata, or `300` | Override continuous display frame count. Discrete/static TSOG keeps its native frame count. |
+| `frames` | `null` | Use native frame count, derive it from continuous TSOG duration/FPS, or fall back to 300. A positive integer overrides continuous display frames; discrete/static TSOG keeps its native count. |
 | `maxPoints` | `1000000` | Positive point limit, or `Infinity` for all points. |
 | `resolution` | `1` | Render scale greater than zero and at most one. |
 | `up` | `"y"` | Camera up axis: `"y"` or `"z"`. |
@@ -96,9 +95,9 @@ can recover. `play()`, `pause()`, and valid `seek()` calls do nothing before a
 model is loaded.
 
 `player.state` is a snapshot with `status`, `loaded`, `playing`, `time`,
-`currentTime`, `duration`, `fps`, `loop`, `playbackRate`, `playable`, `audio`, `nFrames`, `frameIndex`, `format`, `timeline`,
-`name`, `pointCount`,
-`sourceCount`, `progress`, `error`, and `ar`. `time` is normalized; `currentTime` and
+`currentTime`, `duration`, `fps`, `loop`, `playbackRate`, `playable`, `audio`,
+`nFrames`, `frameIndex`, `format`, `timeline`, `name`, `pointCount`, `sourceCount`,
+`progress`, `error`, and `ar`. `time` is normalized; `currentTime` and
 `duration` are seconds. `progress` is parsing progress from zero to one, not
 download progress. `error` is a message or `null`. Status is `empty`, `loading`,
 `ready`, `error`, or `destroyed`. The canvas API also has read-only `time`,
@@ -135,12 +134,59 @@ encodings, the original paper/repository, and timing assumptions.
 
 Subscribe with `addEventListener`. Every event's `detail` contains a state snapshot:
 `loadstart`, `progress`, `loaded`, `play`, `pause`, `timeupdate`, `ended`, `abort`,
-`error`, `arstatechange`, `audiochange`, `ratechange`, and `destroy`. Playback time events are limited to about ten per second;
-explicit seeks emit immediately. `ended` fires when playback stops with looping
-disabled. Hiding the desktop document pauses playback. `destroy()` ends AR, cancels downloads,
-terminates the sorting worker, removes internal listeners and resize observers,
+`error`, `arstatechange`, `audiochange`, `ratechange`, and `destroy`. Playback time
+events are limited to about ten per second; explicit seeks emit immediately. `ended` fires when playback stops with looping
+disabled. Hiding the desktop document pauses playback. `destroy()` ends AR,
+cancels downloads, terminates the sorting worker, removes internal listeners
+and resize observers,
 stops animation, and releases GPU resources. Your canvas remains in the DOM and
 can be reused by a new player.
+
+## Programmatic audio and speed
+
+Load a `.tsog` with an embedded track through the same `load()` method. No
+separate audio request is needed. With an existing canvas `player`, a host page
+can add these controls:
+
+```html
+<button id="play-scene">Play</button>
+<button id="enable-sound">Enable sound</button>
+<button id="mute-sound">Mute</button>
+<button id="faster">1.5×</button>
+```
+
+```js
+// Add these handlers to the same script that owns your canvas player.
+document.querySelector("#play-scene").onclick = () => player.play();
+document.querySelector("#enable-sound").onclick = () => {
+  player.setVolume(0.8);
+  player.setMuted(false); // Retry blocked sound directly in this user gesture.
+  player.play();
+};
+document.querySelector("#mute-sound").onclick = () => player.setMuted(true);
+document.querySelector("#faster").onclick = () => player.setPlaybackRate(1.5);
+
+player.addEventListener("audiochange", ({ detail: { audio } }) => {
+  console.log(audio.status, audio.muted, audio.volume, audio.error);
+});
+player.addEventListener("ratechange", ({ detail }) => {
+  console.log("Playback speed:", detail.playbackRate);
+});
+```
+
+Call `setPlaybackRate()` to adjust speed while retaining the clip's media
+duration and keeping audio aligned. Constructor `fps` and `frames` instead
+change base animation timing; omit them when using the package's authored
+timing. Scene time and audio both pause during desktop tab hiding or XR tracking
+loss. Seeking is still normalized: `player.seek(0.5)` selects the clip's midpoint
+at any playback rate. A shorter track ends before the scene; a longer track
+stops with it. Scene looping also restarts the track.
+
+These setters change this instance's playback settings and persist across later
+loads. To store new defaults in a file, use
+[`packageTSOG()` or the packaging CLI](TSOG.md#add-audio-or-change-defaults).
+The iframe API exposes the same setters as promises; enabling sound may still
+require a click on the child player's own controls.
 
 ## WebXR AR
 
@@ -202,18 +248,22 @@ alone or import it from the hosted site. Append an iframe, then construct its
 controller. The helper loads the player page and configures the connection.
 
 ```html
-<iframe id="scene" title="FTGS player" allow="autoplay" allowfullscreen
+<iframe id="scene" title="FTGS player" allow="autoplay; xr-spatial-tracking" allowfullscreen
   style="width:100%;height:480px;border:0"></iframe>
 <script type="module">
   import { FTGSEmbed } from "https://opsiclear-4dgs.github.io/ftgs-player/embed.js";
 
   const player = new FTGSEmbed(document.querySelector("#scene"), {
-    src: "https://opsiclear-4dgs.github.io/ftgs-player/?controls=0&autoplay=0",
+    src: "https://opsiclear-4dgs.github.io/ftgs-player/?autoplay=0",
   });
   await player.ready;
-  await player.load("./assets/scene.ftgs.ply");
+  await player.load("./assets/scene.tsog");
   await player.seek(0.5);
-  await player.play();
+  // Click Play inside the iframe to start; it can also enable sound there.
+  // await player.setPlaybackRate(1.5);
+  // await player.setVolume(0.8);
+  // await player.setMuted(true);
+  // await player.play();
   // await player.pause();
   // player.destroy();
 </script>
@@ -238,10 +288,12 @@ resolve against the **parent page**. URLs in the iframe page's `?src=` parameter
 resolve against the **player page**. A model server on a different origin from
 the iframe must allow CORS.
 
-Page options include `controls=0` to hide the transport, `autoplay=0`, `loop=0`,
-`arSize` (AR scene diameter in meters), and the existing `fps`, `frames`, `points`, `resolution`, `up`, `view`, `src`, and
-`demo` options. Drag/drop and camera interaction still work with the transport
-hidden. `FTGSEmbed` also accepts `timeout` (connection, default 15,000 ms) and
+Page options include `speed`, `muted`, `volume`, `loop`, and `autoplay`, plus
+the timing, rendering, camera, and AR settings listed in the
+[URL options reference](README.md#url-options). Pass them in the iframe's `src`
+URL. `controls=0` hides the transport while retaining drag/drop and camera
+interaction; keep controls available when users need to enable sound or enter AR.
+`FTGSEmbed` also accepts `timeout` (connection, default 15,000 ms) and
 `requestTimeout` (each command, default 120,000 ms). A command timeout rejects the
 request; call `destroy()` to cancel any remaining work in the iframe.
 
@@ -279,9 +331,14 @@ export function FTGSCanvas({ source }) {
 
 Vue and other frameworks can use the same mount/destroy lifecycle. For direct
 canvas hosting, retain `player.js`, `model.js`, `ftgs.js`, `tsog.js`, `zip.js`,
-`webp.js`, `playback.js`, `audio.js`, `camera.js`, `renderer.js`, `xr.js`, `sort-worker.js`, and `sort.js`
-together, or let your bundler process their module and worker URLs. Self-host these modules with your application so the module
+`webp.js`, `playback.js`, `audio.js`, `camera.js`, `renderer.js`, `xr.js`,
+`sort-worker.js`, and `sort.js` together, or let your bundler process their module
+and worker URLs. Self-host these modules with your application so the module
 worker can load from the same origin. WebGL2 and adequate GPU memory are required.
+
+Copy `tsog-package.js` as well if your application will package audio or save
+playback metadata. It uses the shared TSOG and ZIP modules; the Node CLI in
+`tools/` is only needed for command-line packaging.
 
 When redistributing the player modules, include the repository license and
 [THIRD_PARTY.md](THIRD_PARTY.md), which preserves TSOG and PlayCanvas notices.

@@ -38,6 +38,9 @@ source .venv/bin/activate
 - **gsplat Backend** - Efficient CUDA kernels for fast rendering
 - **Flexible Optimization** - MCMC and DefaultStrategy densification
 - **Keyframe Processing** - Smart sampling for large video sequences
+- **Portable Playback** - Full-model `.ftgs.ply` export and a browser player for
+  `.ftgs.ply` and `.tsog`, with audio, playback metadata, embedding, WASD
+  navigation, and WebXR AR
 
 
 **Based on the paper:** 
@@ -64,6 +67,9 @@ FreeTimeGsVanilla/
 │   ├── normalize.py              # Scene normalization utilities
 │   ├── traj.py                   # Camera trajectory generation
 │   └── read_write_model.py       # COLMAP binary/text I/O
+│
+├── player/                       # Browser player, canvas/iframe APIs, and format docs
+│   └── tools/package-tsog.mjs    # Add audio and playback defaults to a .tsog package
 │
 ├── run_pipeline.sh               # Full pipeline (combine + train)
 ├── run_small.sh                  # Example using the 5M-point budget
@@ -349,36 +355,71 @@ results/
 
 ## Browser player for FTGS files
 
-The standalone [FTGS Player](player/README.md) opens `.ftgs.ply` and packaged `.tsog` files locally or
-from a URL and runs entirely in the browser with WebGL2. Drop a file to play it
-in a full-window canvas with a full-width timeline and controls that fade when idle. It supports
-seeking, automatic looping, orbit/pan/zoom, and WASD movement (Q/E down/up,
-Shift for faster movement). It runs as a static site
-without a build step or package installation. Packaged `.tsog` files can also
-carry optional audio and playback defaults (duration, FPS, speed and looping);
-see the [metadata layout and packaging tool](player/TSOG.md#audio-and-playback-metadata).
-
-On compatible devices, the **AR** button opens a WebXR session with tap-to-place
-and animated playback. Use HTTPS (or localhost); see the
-[AR controls and setup](player/README.md#view-in-ar).
+The [FTGS Player](player/README.md) opens `.ftgs.ply` and packaged `.tsog` files
+locally or from a URL. It runs entirely in the browser with WebGL2, without a
+build step or package installation. Use the
+[hosted player](https://opsiclear-4dgs.github.io/ftgs-player/) or serve it locally:
 
 ```bash
 python -m http.server 8765 --bind 127.0.0.1 --directory player
 ```
 
-Open <http://localhost:8765> and click to open a file or drop in an exported
-`.ftgs.ply` or `.tsog`. Local files stay in the browser. The default preview loads up to
-1 million Gaussians; use `?points=all` for full detail when GPU memory allows.
-See the [player documentation](player/README.md) for format support, controls,
+Open <http://localhost:8765> and drop a file onto the page. Local files stay in
+the browser. The scene fills the window, with a timeline and controls that fade
+when idle. Play, pause, seek, change speed, orbit/pan/zoom, or move with WASD
+(Q/E down/up; Shift moves faster). The default preview loads up to 1 million
+Gaussians; use `?points=all` for full detail when GPU memory allows.
+
+| File | Playback support |
+| --- | --- |
+| `.ftgs.ply` | Complete Vanilla model: normalized time, temporal opacity, linear motion, and SH color. |
+| `.tsog` | Version-4 WebP attribute packages with continuous, discrete, or static scenes; optional embedded audio and playback defaults. |
+
+### Audio and playback defaults
+
+A `.tsog` may store clip duration, FPS, playback speed, looping, and audio
+volume in `meta.json`, alongside one optional audio file in the same ZIP.
+The player applies those defaults and keeps audio aligned through play, pause,
+seek, and loop. The sound button (M) enables or mutes audio; desktop users can
+adjust volume. If the browser blocks sound, click **Enable audio**.
+
+For an existing continuous TSOG animation, package a soundtrack from this
+repository's root with Node.js 22+:
+
+```bash
+node player/tools/package-tsog.mjs scene.tsog scene-with-audio.tsog \
+  --audio soundtrack.mp3 --duration 10 --fps 30 --speed 1.25 --loop --volume 0.8
+```
+
+The command copies the scene attributes and audio without re-encoding them.
+Omit `--audio` to update defaults while retaining the track; `--remove-audio`
+removes it. Use a new output filename. See the
+[metadata and packaging guide](player/TSOG.md#audio-and-playback-metadata)
+for field definitions, discrete/static timing, supported audio types, and API usage.
+
+Use `?src=scene.tsog&speed=1.5&loop=0` to override playback for a link.
+`speed` multiplies playback speed; `fps` changes the animation's frame timing.
+Older packages keep their existing defaults. Audio and playback metadata are
+optional TSOG extensions; the `.ftgs.ply` layout is unchanged.
+
+### AR and embedding
+
+On compatible devices, the **AR** button opens a WebXR session with tap-to-place
+and animated playback. Use HTTPS (or localhost); see the
+[AR controls and setup](player/README.md#view-in-ar).
+
+The [embedding API](player/API.md) supports independent canvas instances and
+iframe controls, including `load`, `play`, `pause`, `seek`, `setPlaybackRate`,
+`setMuted`, `setVolume`, events, and `destroy`. It includes canvas, iframe, and
+React examples. An iframe with audio and AR should use
+`allow="autoplay; xr-spatial-tracking"` and keep controls available for user gestures.
+
+See the [player documentation](player/README.md) for controls, URL options,
 rendering limits, and tests. The repository-owned [TSOG module](player/TSOG.md)
-supports the original version-4 packages and documents the
+documents the
 [TSOG paper](https://arxiv.org/abs/2607.28049),
 [Xiaomi Research's repository](https://github.com/xiaomi-research/tsog), and
 [license notices](player/THIRD_PARTY.md).
-
-The [embedding API](player/API.md) supports independent canvas instances and
-iframe controls, with `load`, `play`, `pause`, `seek`, events, and `destroy`.
-It includes runnable examples and a React lifecycle example.
 
 ## Python/CUDA 4D Viewer
 

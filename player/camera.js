@@ -8,6 +8,7 @@ const unit = (v) => {
   const n = Math.hypot(...v);
   return v.map((x) => x / n);
 };
+const movementKeys = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE"]);
 
 export function lookAt(eye, target, up) {
   const back = unit(eye.map((v, i) => v - target[i]));
@@ -33,20 +34,89 @@ export function lookAt(eye, target, up) {
   ]);
 }
 
+export function validateCameraView({ eye, target, up = "y", fov = 45 }) {
+  if (
+    ![eye, target].every(
+      (v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite),
+    ) ||
+    !["y", "z"].includes(up) ||
+    !Number.isFinite(fov) ||
+    fov < 10 ||
+    fov > 120
+  )
+    throw new Error(
+      "Invalid camera view: use finite eye/target vectors, y/z up and a 10–120 degree fov.",
+    );
+  const distance = Math.hypot(...eye.map((v, i) => v - target[i]));
+  if (!(distance > 1e-6 && Number.isFinite(distance)))
+    throw new Error("Camera eye and target must be distinct finite positions.");
+  return { eye: [...eye], target: [...target], up, fov };
+}
+
 export class OrbitCamera {
   constructor(canvas, onChange) {
     this.canvas = canvas;
     this.onChange = onChange;
+    this.keys = new Set();
+    this.fast = false;
+    this.enabled = true;
+    this.addedTabIndex = !canvas.hasAttribute("tabindex");
+    if (this.addedTabIndex) canvas.tabIndex = 0;
     this.upAxis = "y";
     this.bounds = { center: [0, 0, 0], radius: 1 };
     this.fit();
     this.events = new AbortController();
     const options = { signal: this.events.signal };
+    canvas.addEventListener(
+      "keydown",
+      (event) => {
+        if (!this.enabled) return;
+        if (
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey ||
+          event.isComposing
+        ) {
+          this.stopMoving();
+          return;
+        }
+        if (event.defaultPrevented) return;
+        this.fast = event.shiftKey;
+        if (!movementKeys.has(event.code)) return;
+        event.preventDefault();
+        // After a blur/reset, require a fresh press rather than an old key repeat.
+        if (!event.repeat || this.keys.has(event.code))
+          this.keys.add(event.code);
+      },
+      options,
+    );
+    canvas.addEventListener(
+      "keyup",
+      (event) => {
+        this.keys.delete(event.code);
+        this.fast = event.shiftKey;
+      },
+      options,
+    );
+    canvas.addEventListener("blur", () => this.stopMoving(), options);
+    canvas.ownerDocument.defaultView.addEventListener(
+      "blur",
+      () => this.stopMoving(),
+      options,
+    );
+    canvas.ownerDocument.addEventListener(
+      "visibilitychange",
+      () => {
+        if (canvas.ownerDocument.hidden) this.stopMoving();
+      },
+      options,
+    );
     const pointers = new Map();
     canvas.addEventListener("contextmenu", (e) => e.preventDefault(), options);
     canvas.addEventListener(
       "pointerdown",
       (e) => {
+        if (!this.enabled) return;
         canvas.focus();
         canvas.setPointerCapture(e.pointerId);
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -56,6 +126,7 @@ export class OrbitCamera {
     canvas.addEventListener(
       "pointermove",
       (e) => {
+        if (!this.enabled) return;
         const old = pointers.get(e.pointerId);
         if (!old) return;
         const dx = e.clientX - old.x,
@@ -88,6 +159,7 @@ export class OrbitCamera {
     canvas.addEventListener(
       "wheel",
       (e) => {
+        if (!this.enabled) return;
         e.preventDefault();
         this.zoom(Math.exp(e.deltaY * 0.001));
         this.onChange();
@@ -96,6 +168,7 @@ export class OrbitCamera {
     );
   }
   fit(bounds = this.bounds) {
+    this.stopMoving();
     this.bounds = bounds;
     this.target = [...bounds.center];
     const aspect = Math.max(
@@ -109,25 +182,11 @@ export class OrbitCamera {
     this.fov = Math.PI / 4;
     this.onChange?.();
   }
-  restore({ eye, target, up = "y", fov = 45 }) {
-    if (
-      ![eye, target].every(
-        (v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite),
-      ) ||
-      !["y", "z"].includes(up) ||
-      !Number.isFinite(fov) ||
-      fov < 10 ||
-      fov > 120
-    )
-      throw new Error(
-        "Invalid camera view: use finite eye/target vectors, y/z up and a 10–120 degree fov.",
-      );
+  restore(view) {
+    const { eye, target, up, fov } = validateCameraView(view);
+    this.stopMoving();
     const offset = eye.map((v, i) => v - target[i]);
     const distance = Math.hypot(...offset);
-    if (!(distance > 1e-6 && Number.isFinite(distance)))
-      throw new Error(
-        "Camera eye and target must be distinct finite positions.",
-      );
     this.target = [...target];
     this.distance = distance;
     this.upAxis = up;
@@ -153,6 +212,46 @@ export class OrbitCamera {
     for (let i = 0; i < 3; i++)
       this.target[i] += (-dx * view[4 * i] + dy * view[4 * i + 1]) * scale;
   }
+  stopMoving() {
+    this.keys?.clear();
+    this.fast = false;
+  }
+  update(seconds) {
+    if (!this.keys.size) return;
+    if (!this.canvas.matches(":focus") || this.canvas.ownerDocument.hidden) {
+      this.stopMoving();
+      return;
+    }
+    const held = (code) => Number(this.keys.has(code));
+    this.move(
+      held("KeyW") - held("KeyS"),
+      held("KeyD") - held("KeyA"),
+      held("KeyE") - held("KeyQ"),
+      seconds,
+      this.fast,
+    );
+  }
+  move(forward, right, up, seconds, fast = false) {
+    if (!(seconds > 0) || !Number.isFinite(seconds)) return;
+    const { view } = this.snapshot();
+    const direction = [0, 1, 2].map(
+      (axis) =>
+        right * view[4 * axis] -
+        forward * view[4 * axis + 2] +
+        (axis === (this.upAxis === "z" ? 2 : 1) ? up : 0),
+    );
+    const length = Math.hypot(...direction);
+    if (length < 1e-8) return;
+    const speed = Math.max(
+      this.bounds.radius * 0.01,
+      Math.min(this.bounds.radius, this.distance),
+    );
+    const step = (speed * (fast ? 4 : 1) * Math.min(seconds, 0.1)) / length;
+    // Translate the eye and its orbit target together, preserving the view angle.
+    for (let axis = 0; axis < 3; axis++)
+      this.target[axis] += direction[axis] * step;
+    this.onChange?.();
+  }
   snapshot() {
     const horizontal = Math.cos(this.pitch) * this.distance;
     const offset = [
@@ -174,6 +273,9 @@ export class OrbitCamera {
     };
   }
   destroy() {
+    this.stopMoving();
     this.events.abort();
+    if (this.addedTabIndex && this.canvas.getAttribute("tabindex") === "0")
+      this.canvas.removeAttribute("tabindex");
   }
 }

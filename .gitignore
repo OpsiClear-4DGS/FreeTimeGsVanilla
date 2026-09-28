@@ -12,3 +12,5 @@ test_renders*/
 *.log
 uv.lock
 .claude/
+*.tsog
+!player/tests/fixtures/tsog/*.tsog

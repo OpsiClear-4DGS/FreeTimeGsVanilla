@@ -364,21 +364,36 @@ results/
 
 ## Browser player for FTGS files
 
-The standalone [FTGS Player](player/README.md) opens `.ftgs.ply` files locally or
+The standalone [FTGS Player](player/README.md) opens `.ftgs.ply` and packaged `.tsog` files locally or
 from a URL and runs entirely in the browser with WebGL2. Drop a file to play it
-in a full-window canvas with a small playback bar that fades when idle. It supports
-seeking, automatic looping and orbit/pan/zoom. It runs as a static site
-without a build step or package installation.
+in a full-window canvas with a full-width timeline and controls that fade when idle. It supports
+seeking, automatic looping, orbit/pan/zoom, and WASD movement (Q/E down/up,
+Shift for faster movement). It runs as a static site
+without a build step or package installation. Packaged `.tsog` files can also
+carry optional audio and playback defaults (duration, FPS, speed and looping);
+see the [metadata layout and packaging tool](player/TSOG.md#audio-and-playback-metadata).
+
+On compatible devices, the **AR** button opens a WebXR session with tap-to-place
+and animated playback. Use HTTPS (or localhost); see the
+[AR controls and setup](player/README.md#view-in-ar).
 
 ```bash
 python -m http.server 8765 --bind 127.0.0.1 --directory player
 ```
 
 Open <http://localhost:8765> and click to open a file or drop in an exported
-`.ftgs.ply`. Local files stay in the browser. The default preview loads up to
+`.ftgs.ply` or `.tsog`. Local files stay in the browser. The default preview loads up to
 1 million Gaussians; use `?points=all` for full detail when GPU memory allows.
 See the [player documentation](player/README.md) for format support, controls,
-rendering limits, and tests.
+rendering limits, and tests. The repository-owned [TSOG module](player/TSOG.md)
+supports the original version-4 packages and documents the
+[TSOG paper](https://arxiv.org/abs/2607.28049),
+[Xiaomi Research's repository](https://github.com/xiaomi-research/tsog), and
+[license notices](player/THIRD_PARTY.md).
+
+The [embedding API](player/API.md) supports independent canvas instances and
+iframe controls, with `load`, `play`, `pause`, `seek`, events, and `destroy`.
+It includes runnable examples and a React lifecycle example.
 
 ## Python/CUDA 4D Viewer
 

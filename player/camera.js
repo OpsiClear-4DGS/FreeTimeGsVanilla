@@ -106,6 +106,39 @@ export class OrbitCamera {
     this.distance = (bounds.radius / Math.sin(halfAngle)) * 1.1;
     this.yaw = 0.45;
     this.pitch = 0.12;
+    this.fov = Math.PI / 4;
+    this.onChange?.();
+  }
+  restore({ eye, target, up = "y", fov = 45 }) {
+    if (
+      ![eye, target].every(
+        (v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite),
+      ) ||
+      !["y", "z"].includes(up) ||
+      !Number.isFinite(fov) ||
+      fov < 10 ||
+      fov > 120
+    )
+      throw new Error(
+        "Invalid camera view: use finite eye/target vectors, y/z up and a 10–120 degree fov.",
+      );
+    const offset = eye.map((v, i) => v - target[i]);
+    const distance = Math.hypot(...offset);
+    if (!(distance > 1e-6 && Number.isFinite(distance)))
+      throw new Error(
+        "Camera eye and target must be distinct finite positions.",
+      );
+    this.target = [...target];
+    this.distance = distance;
+    this.upAxis = up;
+    this.fov = (fov * Math.PI) / 180;
+    this.yaw = Math.atan2(offset[0], up === "z" ? -offset[1] : offset[2]);
+    this.pitch = Math.asin(
+      Math.max(
+        -0.999999,
+        Math.min(0.999999, offset[up === "z" ? 2 : 1] / distance),
+      ),
+    );
     this.onChange?.();
   }
   zoom(factor) {
@@ -137,7 +170,7 @@ export class OrbitCamera {
         this.upAxis === "z" ? [0, 0, 1] : [0, 1, 0],
       ),
       near: Math.max(1e-6, this.bounds.radius * 0.0001),
-      fov: Math.PI / 4,
+      fov: this.fov,
     };
   }
   destroy() {

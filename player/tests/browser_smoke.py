@@ -82,6 +82,33 @@ def main():
             page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
             page.goto(url)
             ready(page)
+            projection = page.evaluate("""async () => {
+              const {SplatRenderer} = await import('/renderer.js');
+              const canvas = document.createElement('canvas');
+              canvas.style.cssText = 'position:fixed;left:-1000px;width:64px;height:64px';
+              document.body.append(canvas);
+              const renderer = new SplatRenderer(canvas), gl = renderer.gl;
+              const camera = {view: new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]),
+                eye: [0,0,0], near: 0.001, fov: Math.PI/4};
+              const colors = [];
+              for (const x of [0, 1000]) {
+                renderer.setModel({
+                  positionTime: new Float32Array([x,0,-0.02,0.5]),
+                  velocityDuration: new Float32Array([0,0,0,1]),
+                  covarianceA: new Float32Array([1,0,0,1]),
+                  covarianceB: new Float32Array([0,1,1,0]),
+                  sh: new Float32Array([1,1,1,0]), coefficients: 1,
+                  useVelocity: false, opacityFloor: 0.0001,
+                });
+                renderer.draw(new Uint32Array([0]), camera, 0.5, 0, 1);
+                const pixel = new Uint8Array(4);
+                gl.readPixels(canvas.width/2,canvas.height/2,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
+                colors.push([...pixel]);
+              }
+              renderer.destroy(); canvas.remove(); return colors;
+            }""")
+            assert min(projection[0][:3]) > 100, "Centered Gaussian did not render"
+            assert max(projection[1][:3]) < 20, "Offscreen Gaussian stretched over the viewport"
             seek(page, 0.15)
             early = scene_image(page)
             assert sum(ImageStat.Stat(early).stddev) > 10, "Canvas is blank"

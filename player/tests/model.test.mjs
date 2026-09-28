@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseHeader, readFTGS, covarianceFromQuaternion } from "../ftgs.js";
 import { sortVisible } from "../sort.js";
-import { lookAt } from "../camera.js";
+import { lookAt, OrbitCamera } from "../camera.js";
 import { demoFile } from "../demo.js";
 
 function fixture({
@@ -88,6 +88,32 @@ const near = (actual, expected, eps = 1e-5) => {
     assert.ok(Math.abs(v - expected[i]) < eps, `${i}: ${v} != ${expected[i]}`),
   );
 };
+
+test("bookmarked camera restores position and viewing direction with Y or Z up", () => {
+  const camera = Object.create(OrbitCamera.prototype);
+  camera.bounds = { radius: 1 };
+  const eye = [-0.38, 0.16, 0.06],
+    target = [-0.07, -0.39, -0.1];
+  for (const up of ["y", "z"]) {
+    camera.restore({ eye, target, up, fov: 38 });
+    const snapshot = camera.snapshot();
+    near(snapshot.eye, eye);
+    near(
+      [...snapshot.view],
+      [...lookAt(eye, target, up === "z" ? [0, 0, 1] : [0, 1, 0])],
+    );
+    near([snapshot.fov], [(38 * Math.PI) / 180]);
+  }
+  assert.throws(() => camera.restore({ eye, target: eye }), /distinct/);
+  assert.throws(
+    () => camera.restore({ eye: [Infinity, 0, 0], target }),
+    /Invalid camera/,
+  );
+  assert.throws(
+    () => camera.restore({ eye, target, fov: 180 }),
+    /Invalid camera/,
+  );
+});
 
 test("FTGS fields are located by name and SH channels are reconstructed correctly", async () => {
   const model = await readFTGS(

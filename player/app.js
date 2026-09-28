@@ -15,6 +15,7 @@ const clock = (seconds) => {
     )}:${((hundredths % 6000) / 100).toFixed(2).padStart(5, "0")}`;
 };
 let renderer, camera, worker, pending, model, source, loadController;
+let bookmarkView, bookmarkURL;
 let generation = 0,
   time = 0,
   playing = false,
@@ -167,6 +168,10 @@ async function load(input) {
     };
     source = item;
     camera.fit(data.bounds);
+    if (bookmarkView && item.url === bookmarkURL) {
+      camera.restore(bookmarkView);
+      $("up-axis").value = camera.upAxis;
+    }
     connectWorker(data);
     $("scene-name").textContent = item.name;
     $("point-count").textContent = number(data.count);
@@ -270,7 +275,12 @@ $("loop-toggle").onclick = () => {
   $("loop-toggle").classList.toggle("active", loop);
   $("loop-toggle").setAttribute("aria-pressed", String(loop));
 };
-$("fit-camera").onclick = () => camera?.fit();
+$("fit-camera").onclick = () => {
+  if (bookmarkView && source?.url === bookmarkURL) {
+    camera.restore(bookmarkView);
+    $("up-axis").value = camera.upAxis;
+  } else camera?.fit();
+};
 $("fullscreen").onclick = async () => {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -331,7 +341,7 @@ window.addEventListener("keydown", (event) => {
       time +
         (event.key === "ArrowRight" ? 1 : -1) / Math.max(1, frameCount() - 1),
     );
-  } else if (event.key.toLowerCase() === "r") camera?.fit();
+  } else if (event.key.toLowerCase() === "r") $("fit-camera").click();
   else if (event.key.toLowerCase() === "f") $("fullscreen").click();
 });
 window.addEventListener("dragover", (event) => {
@@ -383,7 +393,15 @@ try {
     dirty = true;
   });
   raf = requestAnimationFrame(tick);
-  const url = new URLSearchParams(location.search).get("src");
+  const query = new URLSearchParams(location.search);
+  const url = query.get("src");
+  if (["24", "30", "60"].includes(query.get("fps")))
+    $("fps").value = query.get("fps");
+  if (url && query.has("view")) {
+    bookmarkView = JSON.parse(query.get("view"));
+    camera.restore(bookmarkView);
+    bookmarkURL = new URL(url, location.href).href;
+  }
   void load(url || { blob: demoFile(), name: "Kinetic ribbon", demo: true });
 } catch (error) {
   status(error.message, "error");

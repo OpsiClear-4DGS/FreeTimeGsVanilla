@@ -26,6 +26,23 @@ requests when it is on a different origin. You can also link directly with
 `?src=` followed by a URL-encoded model address. The page can be hosted as static
 files; it has no application server, analytics, or remote assets.
 
+For a captured scene, a camera inside the capture area can give a much better
+initial view than fitting all points. A model link can include `fps=24`, `30` or
+`60`, and a URL-encoded JSON `view` parameter, for example:
+
+```js
+const query = new URLSearchParams({
+  src: "results/scene.ftgs.ply",
+  fps: "60",
+  view: JSON.stringify({ eye: [0, -1, 0.3], target: [0, 0, 0], up: "z", fov: 45 }),
+});
+// Link to `/?${query}`. Eye and target use the model's coordinate system.
+```
+
+`up` is `y` or `z`; `fov` is the vertical field of view in degrees (10–120).
+Fit / R restores this bookmarked view for its model. These are player settings;
+the FTGS file itself does not store capture cameras or frame rate.
+
 ## Controls
 
 | Action | Control |

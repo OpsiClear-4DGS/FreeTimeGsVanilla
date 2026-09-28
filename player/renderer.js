@@ -52,8 +52,12 @@ void main() {
   vec3 right=vec3(view[0][0],view[1][0],view[2][0]);
   vec3 up=vec3(view[0][1],view[1][1],view[2][1]);
   vec3 back=vec3(view[0][2],view[1][2],view[2][2]);
-  vec3 jx=(focal/depth)*right+(focal*center.x/(depth*depth))*back;
-  vec3 jy=(focal/depth)*up+(focal*center.y/(depth*depth))*back;
+  // Bound the covariance Jacobian outside the frustum, as in the CUDA rasterizer.
+  // Without this, near-camera offscreen centers produce screen-filling ellipses.
+  vec2 limit=1.3*viewport/(2.0*focal);
+  vec2 slope=clamp(center.xy/depth,-limit,limit);
+  vec3 jx=(focal/depth)*(right+slope.x*back);
+  vec3 jy=(focal/depth)*(up+slope.y*back);
   float aa=dot(jx,C*jx)+0.3, ab=dot(jx,C*jy), bb=dot(jy,C*jy)+0.3;
   float mid=0.5*(aa+bb), delta=length(vec2(0.5*(aa-bb),ab));
   float l1=max(mid+delta,0.1), l2=max(mid-delta,0.1);

@@ -1,5 +1,5 @@
-import { FTGSPlayer } from "./player.js?v=7";
-import { attachPlayerBridge } from "./bridge.js?v=7";
+import { FTGSPlayer } from "./player.js?v=8";
+import { attachPlayerBridge } from "./bridge.js?v=8";
 import { demoFile } from "./demo.js";
 import { mountPlayerShell } from "./shell.js?v=6";
 

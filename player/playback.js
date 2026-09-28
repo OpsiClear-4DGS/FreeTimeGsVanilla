@@ -19,7 +19,8 @@ const audioTypes = {
   webm: "audio/webm",
 };
 export function audioMimeType(filename) {
-  return audioTypes[filename.split(".").pop().toLowerCase()] ?? "";
+  const extension = filename.split(".").pop().toLowerCase();
+  return Object.hasOwn(audioTypes, extension) ? audioTypes[extension] : "";
 }
 export function validatePlaybackRate(rate) {
   if (!Number.isFinite(rate) || rate < 0.25 || rate > 4)

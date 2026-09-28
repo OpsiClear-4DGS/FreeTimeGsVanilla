@@ -143,16 +143,26 @@ test("TSOG rejects corrupt images and supports cancellation between decoding sta
   await assert.rejects(decodeTSOG(f.meta, f.load, {signal:controller.signal, onProgress:() => controller.abort()}), {name:"AbortError"});
 });
 
-function zipEntry(name, raw, method = 0) {
+function zipEntry(name, raw, method = 0, descriptor = null) {
   const label = Buffer.from(name), packed = method ? deflateRawSync(raw) : raw;
   const local = Buffer.alloc(30), central = Buffer.alloc(46), end = Buffer.alloc(22);
+  const trailer = Buffer.alloc(descriptor ? (descriptor === "signed" ? 16 : 12) : 0);
   local.writeUInt32LE(0x04034b50); local.writeUInt16LE(method,8); local.writeUInt16LE(label.length,26);
   local.writeUInt32LE(crc32(raw),14); local.writeUInt32LE(packed.length,18); local.writeUInt32LE(raw.length,22);
   central.writeUInt32LE(0x02014b50); central.writeUInt16LE(method,10); central.writeUInt16LE(label.length,28);
   central.writeUInt32LE(crc32(raw),16); central.writeUInt32LE(packed.length,20); central.writeUInt32LE(raw.length,24);
+  if (descriptor) {
+    local.writeUInt16LE(8,6); central.writeUInt16LE(8,8);
+    local.fill(0,14,26);
+    const start = descriptor === "signed" ? 4 : 0;
+    if (start) trailer.writeUInt32LE(0x08074b50);
+    trailer.writeUInt32LE(crc32(raw),start);
+    trailer.writeUInt32LE(packed.length,start+4);
+    trailer.writeUInt32LE(raw.length,start+8);
+  }
   end.writeUInt32LE(0x06054b50); end.writeUInt16LE(1,8); end.writeUInt16LE(1,10);
-  end.writeUInt32LE(central.length+label.length,12); end.writeUInt32LE(local.length+label.length+packed.length,16);
-  return Buffer.concat([local,label,packed,central,label,end]);
+  end.writeUInt32LE(central.length+label.length,12); end.writeUInt32LE(local.length+label.length+packed.length+trailer.length,16);
+  return Buffer.concat([local,label,packed,trailer,central,label,end]);
 }
 
 test("ZIP stored/deflated entries, CRC, size limits, truncation and cancellation", async () => {
@@ -168,9 +178,46 @@ test("ZIP stored/deflated entries, CRC, size limits, truncation and cancellation
   await assert.rejects((await openZip(new Blob([corrupt]))).read("a"), /checksum/);
   await assert.rejects(openZip(new Blob([corrupt.slice(0,-4)])), /end-of-directory/);
   const expanded = zipEntry("a",raw,8); expanded.writeUInt32LE(1,expanded.length-22-47+24);
+  expanded.writeUInt32LE(1,22); // Headers agree; the DEFLATE output still exceeds the declared size.
   await assert.rejects((await openZip(new Blob([expanded]))).read("a"), /expanded size/);
   const controller = new AbortController(); controller.abort();
   await assert.rejects(openZip(new Blob([corrupt]),controller.signal), {name:"AbortError"});
+});
+
+test("ZIP local CRC and sizes must agree with the central directory", async () => {
+  for (const method of [0,8]) for (const field of [14,18,22]) {
+    const bytes = zipEntry("a",Buffer.from("header agreement"),method);
+    bytes[field] ^= 1;
+    const archive = await openZip(new Blob([bytes]));
+    await assert.rejects(archive.read("a"), /inconsistent local CRC or size/);
+  }
+});
+
+test("ZIP streamed descriptors work with or without signatures and reject corrupt or missing records", async () => {
+  const raw = Buffer.from("streamed data");
+  for (const method of [0,8]) for (const descriptor of ["signed","unsigned"]) {
+    const bytes = zipEntry("a",raw,method,descriptor);
+    assert.deepEqual(await (await openZip(new Blob([bytes]))).read("a"), new Uint8Array(raw));
+    const central = bytes.readUInt32LE(bytes.length-22+16);
+    const start = central - (descriptor === "signed" ? 16 : 12);
+    const crc = start + (descriptor === "signed" ? 4 : 0);
+    for (const field of [crc,crc+4,crc+8]) {
+      const corrupt = Buffer.from(bytes); corrupt[field] ^= 1;
+      await assert.rejects((await openZip(new Blob([corrupt]))).read("a"), /data descriptor/);
+    }
+    for (const retained of [0,8]) {
+      const missing = Buffer.concat([bytes.subarray(0,start+retained),bytes.subarray(central)]);
+      missing.writeUInt32LE(start+retained,missing.length-22+16);
+      await assert.rejects((await openZip(new Blob([missing]))).read("a"), /data descriptor/);
+    }
+  }
+  // This synthetic four-byte payload's CRC is the optional descriptor signature.
+  const collision = Buffer.from("ac0a7ad5", "hex");
+  assert.equal(crc32(collision), 0x08074b50);
+  for (const descriptor of ["signed","unsigned"]) {
+    const archive = await openZip(new Blob([zipEntry("a",collision,0,descriptor)]));
+    assert.deepEqual(await archive.read("a"), new Uint8Array(collision));
+  }
 });
 
 test("original encoder bundles with streamed ZIP descriptors load their v4 metadata", async () => {

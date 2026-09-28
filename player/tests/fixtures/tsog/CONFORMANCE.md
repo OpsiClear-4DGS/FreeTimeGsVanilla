@@ -56,6 +56,12 @@ lossless image headers, CRC errors, and the CLI's exit codes and validation scop
 [validate-tsog-schema.py](../../validate-tsog-schema.py) applies the independent
 Draft 2020-12 validator to the same metadata cases and synthetic archives.
 
+[tsog.test.mjs](../../tsog.test.mjs) also checks local ZIP header consistency,
+signed/unsigned streamed data descriptors, corrupt or missing descriptor fields,
+and a synthetic payload whose CRC equals the optional descriptor signature.
+Metadata cases include unusual audio extensions that require an explicit MIME
+type; inherited JavaScript object properties are not recognized extensions.
+
 [audio-fixture.mjs](../../audio-fixture.mjs) generates a quiet PCM sine tone in
 memory. [playback.test.mjs](../../playback.test.mjs) checks metadata, packaging and
 timing. [browser_audio.py](../../browser_audio.py) checks real media playback,

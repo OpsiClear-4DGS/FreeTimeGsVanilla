@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolvePlayback, validatePlaybackMetadata } from "../playback.js";
+import { resolvePlayback, validatePlaybackMetadata, audioMimeType } from "../playback.js";
 import { packageTSOG } from "../tsog-package.js";
 import { openZip } from "../zip.js";
 import { toneFile } from "./audio-fixture.mjs";
@@ -16,6 +16,21 @@ const source = async (name = "continuous16") =>
   ]);
 const metadata = async (archive) =>
   JSON.parse(new TextDecoder().decode(await archive.read("meta.json")));
+
+test("unknown audio extensions require an explicit MIME type, including object property names", async () => {
+  const tone = await toneFile().arrayBuffer(), input = await source();
+  for (const extension of ["constructor", "__proto__", "CONSTRUCTOR"]) {
+    assert.equal(audioMimeType(`track.${extension}`), "");
+    await assert.rejects(packageTSOG(input, {
+      audio: new File([tone], `track.${extension}`),
+    }), /audio MIME type/);
+    const archive = await openZip(await packageTSOG(input, {
+      audio: new File([tone], `track.${extension}`, { type: "audio/wav" }),
+    }));
+    assert.equal((await metadata(archive)).audio.file, "audio/track.bin");
+    assert.deepEqual(await archive.read("audio/track.bin"), new Uint8Array(tone));
+  }
+});
 
 test("file timing, speed and loop defaults respect explicit overrides and legacy files", () => {
   const continuous = {

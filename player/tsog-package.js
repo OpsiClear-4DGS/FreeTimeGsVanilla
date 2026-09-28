@@ -1,7 +1,7 @@
 // Repackage existing attributes without decoding or recompressing their images.
-import { openZip, crc32 } from "./zip.js?v=6";
-import { validateTSOGMetadata, readTSOGMetadata, TSOG_PROFILE } from "./tsog.js?v=7";
-import { audioMimeType, MAX_AUDIO_BYTES } from "./playback.js?v=7";
+import { openZip, crc32 } from "./zip.js?v=8";
+import { validateTSOGMetadata, readTSOGMetadata, TSOG_PROFILE } from "./tsog.js?v=8";
+import { audioMimeType, MAX_AUDIO_BYTES } from "./playback.js?v=8";
 
 function storedZip(entries) {
   const body = [],

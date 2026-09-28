@@ -1,4 +1,4 @@
-import { PLAYER_EVENTS } from "./player.js?v=7";
+import { PLAYER_EVENTS } from "./player.js?v=8";
 
 const protocol = "ftgs-player";
 const version = 1;

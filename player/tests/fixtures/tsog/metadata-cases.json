@@ -53,6 +53,9 @@
     { "name": "MIME parameters", "valid": false, "edits": [["playback", {"duration":2}], ["audio", {"file":"tone.wav","mimeType":"audio/wav;codecs=pcm"}]] },
     { "name": "audio volume out of range", "valid": false, "edits": [["playback", {"duration":2}], ["audio", {"file":"tone.wav","volume":-0.1}]] },
     { "name": "MIME newline", "valid": false, "edits": [["playback", {"duration":2}], ["audio", {"file":"tone.wav","mimeType":"audio/wav\n"}]] },
-    { "name": "array-like motion range", "valid": false, "edits": [["timeline", {"type":0,"N":1,"delta":65536,"files":["tl","th"]}], ["temporal", {"means":{"mins":{"0":[0,0,0],"length":1},"maxs":[[0,0,0]],"files":["v"]}}]] }
+    { "name": "array-like motion range", "valid": false, "edits": [["timeline", {"type":0,"N":1,"delta":65536,"files":["tl","th"]}], ["temporal", {"means":{"mins":{"0":[0,0,0],"length":1},"maxs":[[0,0,0]],"files":["v"]}}]] },
+    { "name": "constructor audio extension", "valid": false, "edits": [["playback", {"duration":2}], ["audio", {"file":"audio/track.constructor"}]] },
+    { "name": "prototype audio extension", "valid": false, "edits": [["playback", {"duration":2}], ["audio", {"file":"audio/track.__proto__"}]] },
+    { "name": "unusual extension with explicit MIME", "valid": true, "edits": [["playback", {"duration":2}], ["audio", {"file":"audio/track.constructor","mimeType":"audio/wav"}]] }
   ]
 }

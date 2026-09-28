@@ -1,6 +1,6 @@
 # TSOG Playback Profile 1
 
-Specification version **1.0**, 2026-09-28. Maintained by **OpsiClear-4DGS**.
+Specification version **1.0.1**, 2026-09-28. Maintained by **OpsiClear-4DGS**.
 
 This document specifies a `.tsog` interchange profile: the supported subset of
 Xiaomi Research's version-4 Gaussian encoding, plus optional playback defaults
@@ -78,6 +78,13 @@ size and CRC-32 for every consumed entry. Encryption, ZIP64, split/multi-disk
 archives, duplicate entry names, unsupported methods, inconsistent local
 headers, and truncated records MUST be rejected. Entry order is insignificant.
 Unreferenced entries MAY be ignored and MUST NOT be executed.
+
+For consumed entries without a data descriptor, the local CRC and compressed/
+uncompressed sizes MUST equal the central-directory values. With the descriptor
+flag set, these local fields are zero and a trailing descriptor supplies the
+matching CRC and sizes. Readers MUST accept descriptors both with and without
+their optional signature, and reject missing, truncated or conflicting records.
+The container follows the [PKWARE ZIP specification](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT).
 
 Referenced names are literal, case-sensitive UTF-8 ZIP names, relative to the
 archive root. They MUST be nonempty and MUST NOT contain backslashes, U+0000–001F,
@@ -494,6 +501,9 @@ upstream license notices remain in [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Revision history
 
+- **1.0.1 (2026-09-28):** Clarifies ZIP integrity checks and expands negative
+  conformance cases for archive records and audio MIME inference. Profile version
+  1, the schema, attribute encoding and playback semantics are unchanged.
 - **1.0 (2026-09-28):** First explicit playback profile. Preserves v4 attribute
   bytes and existing playback/audio meanings; adds profile identification,
   normative decoding/compatibility rules, schema and conformance tools.

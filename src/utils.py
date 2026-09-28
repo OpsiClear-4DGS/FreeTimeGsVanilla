@@ -345,14 +345,12 @@ def find_k_neighbors(input, k):
 
 from typing import Dict
 import math
-import kornia
-try:
-    from plas import sort_with_plas
-except:
-    raise ImportError(
-        "Please install PLAS with 'pip install git+https://github.com/fraunhoferhhi/PLAS.git' to use sorting"
-    )
 def get_gifstream_sorted_loss(splats: Dict[str, Tensor], kernel_size = 5, sigma=0.5) -> Tensor:
+    try:
+        import kornia
+        from plas import sort_with_plas
+    except ImportError as error:
+        raise ImportError("Sorting loss requires the optional kornia and PLAS packages") from error
     n_gs = splats["anchors"].shape[0]
     n_sidelen = math.ceil(math.ceil(n_gs**0.5) / 4) * 4
     padded_length = n_sidelen ** 2 - n_gs

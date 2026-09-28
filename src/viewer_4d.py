@@ -30,6 +30,9 @@ from gsplat.rendering import rasterization
 import nerfview
 
 
+from freetime_ops import MIN_DURATION, temporal_opacity, positions_at_time, validate_vanilla_checkpoint
+
+
 @dataclass
 class Config4D:
     """Configuration for 4D viewer."""
@@ -71,6 +74,9 @@ class Splats4D:
         print(f"Loading checkpoint from {ckpt_path}...")
         # Load on CPU first to avoid CUDA init issues, then move to device
         ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        validate_vanilla_checkpoint(ckpt)
+        self.use_velocity = bool(ckpt.get("use_velocity", True))
+        cfg.total_frames = int(ckpt.get("n_frames", cfg.total_frames))
         splats = ckpt["splats"]
 
         # Load all parameters
@@ -83,7 +89,7 @@ class Splats4D:
 
         # 4D parameters
         self.times = splats["times"].to(cfg.device)  # [N, 1] - canonical times
-        self.durations = splats["durations"].to(cfg.device)  # [N, 1] - temporal durations (log)
+        self.durations = splats["durations"].to(cfg.device).clamp_min(np.log(MIN_DURATION))  # [N, 1] - temporal durations (log)
         self.velocities = splats["velocities"].to(cfg.device)  # [N, 3] - velocities
 
         self.n_gaussians = self.means.shape[0]
@@ -164,36 +170,10 @@ class Splats4D:
         print(f"Cached {len(self.visibility_masks)} visibility masks")
 
     def compute_temporal_opacity(self, t: float) -> torch.Tensor:
-        """
-        Compute temporal opacity: sigma(t) = exp(-0.5 * ((t - mu_t) / s)^2)
-
-        Args:
-            t: Normalized time in [0, 1]
-
-        Returns:
-            Temporal opacity [N]
-        """
-        mu_t = self.times  # [N, 1]
-        s = torch.exp(self.durations)  # [N, 1]
-        s = torch.clamp(s, min=0.02)  # Prevent collapse
-
-        return torch.exp(-0.5 * ((t - mu_t) / (s + 1e-8)) ** 2).squeeze(-1)  # [N]
+        return temporal_opacity(self.times, self.durations, t)
 
     def compute_positions_at_time(self, t: float) -> torch.Tensor:
-        """
-        Compute positions at time t: mu_x(t) = mu_x + v * (t - mu_t)
-
-        Args:
-            t: Normalized time in [0, 1]
-
-        Returns:
-            Positions at time t [N, 3]
-        """
-        mu_x = self.means  # [N, 3]
-        mu_t = self.times  # [N, 1]
-        v = self.velocities  # [N, 3]
-
-        return mu_x + v * (t - mu_t)  # [N, 3]
+        return positions_at_time(self.means, self.velocities, self.times, t, self.use_velocity)
 
     def get_visibility_mask(self, frame_idx: int, t: float) -> torch.Tensor:
         """

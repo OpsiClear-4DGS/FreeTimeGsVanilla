@@ -30,6 +30,7 @@ import cv2
 import imageio.v2 as imageio
 import numpy as np
 import torch
+from tqdm import tqdm
 
 try:
     # Try new API first (pycolmap >= 3.10)
@@ -53,6 +54,18 @@ from .normalize import (
     transform_cameras,
     transform_points,
 )
+
+
+def find_available_colmap_frames(sparse_dir: str, start_frame: int, end_frame: int):
+    """Find per-frame reconstructions used by the existing COLMAP init loaders."""
+    frames = []
+    for path in Path(sparse_dir).glob("frame_*"):
+        suffix = path.name.removeprefix("frame_")
+        if path.is_dir() and suffix.isdigit() and start_frame <= int(suffix) < end_frame:
+            model = path / "0" if (path / "0").is_dir() else path
+            if (model / "points3D.bin").exists() or (model / "points3D.txt").exists():
+                frames.append((int(suffix), str(model)))
+    return sorted(frames)
 
 
 def _load_colmap_points(colmap_path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -109,7 +122,7 @@ def _detect_image_format(camera_path: str) -> Dict[str, Any]:
         raise ValueError(f"Camera path does not exist: {camera_path}")
 
     files = sorted([f for f in os.listdir(camera_path)
-                   if f.endswith(('.png', '.jpg', '.jpeg'))])
+                   if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'))])
     if not files:
         raise ValueError(f"No image files found in {camera_path}")
 
@@ -388,7 +401,7 @@ class FreeTimeParser:
 
             transform = T2 @ T1
         else:
-            transform = np.eye(4)
+            transform = np.eye(4, dtype=np.float32)
 
         # Camera paths (folders containing images)
         images_dir = os.path.join(data_dir, "images")

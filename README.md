@@ -6,11 +6,30 @@
 <img src="assets/demo.gif" width="100%" alt="FreeTimeGS Demo">
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
 A vanilla minimal implementation of **FreeTimeGS** built on [gsplat](https://github.com/nerfstudio-project/gsplat) for reconstructing dynamic scenes from multi-view video.
 
+## Model scope
 
+This repository uses normalized time, exponential durations, the original motion
+and opacity equations, and the two original training presets.
+
+Correctness and compatibility fixes cover frame-gap velocity estimates,
+consistent NPZ time and coordinate conversion, per-point durations, small sampling
+budgets, Adam resume settings, duration gradients, LPIPS input normalization, relocation
+statistics, and matching training/viewer/export math. MP4 output handles odd
+image dimensions and export failures do not interrupt a saved training run.
+
+## Installation
+
+Use Python 3.12+, a CUDA-capable PyTorch environment, and a CUDA toolkit for the
+gsplat, fused-ssim, and torch-scatter extensions. The lockfile pins dependencies:
+
+```bash
+uv sync --locked
+source .venv/bin/activate
+```
 
 **Key Features**
 
@@ -47,8 +66,8 @@ FreeTimeGsVanilla/
 │   └── read_write_model.py       # COLMAP binary/text I/O
 │
 ├── run_pipeline.sh               # Full pipeline (combine + train)
-├── run_small.sh                  # Quick training (4M points)
-├── run_full.sh                   # Full training (15M points)
+├── run_small.sh                  # Example using the 5M-point budget
+├── run_full.sh                   # Example using all input points
 │
 ├── LICENSE                       # AGPL-3.0 license
 └── README.md                     # This file
@@ -90,13 +109,15 @@ Keyframes: *              *              *              *
            0              5              10             55
 ```
 
-This extracts 12 keyframes instead of 60 frames, reducing memory and computation by ~5x while preserving motion information.
+The final frame is also included when its point cloud exists, so the sequence
+retains endpoint coverage even when the stride does not divide the frame range.
 
 ### Velocity Estimation
 
-Velocity is computed between consecutive **keyframes** (not all frames):
+Velocity uses the next frame when available, otherwise the next keyframe or
+final endpoint. Displacement is divided by the actual frame gap:
 ```
-v = (position_keyframe[t+step] - position_keyframe[t]) / step
+v = (matched_position[next_frame] - position[t]) / (next_frame - t)
 ```
 
 This gives the average velocity over the keyframe interval.
@@ -108,17 +129,23 @@ The NPZ file contains the initial 4D Gaussian data:
 | Field | Shape | Description |
 |-------|-------|-------------|
 | `positions` | [N, 3] | 3D coordinates (x, y, z) |
-| `velocities` | [N, 3] | Velocity vectors (vx, vy, vz) |
+| `velocities` | [N, 3] | Velocity vectors in world units per frame |
 | `colors` | [N, 3] | RGB colors normalized to [0, 1] |
 | `times` | [N, 1] | Normalized timestamps in [0, 1] |
 | `durations` | [N, 1] | Temporal duration (visibility window) |
 | `has_velocity` | [N] | Boolean mask for valid velocity estimates |
 
 **Metadata fields:**
-- `frame_start`, `frame_end`: Frame range
+- `frame_start`, `frame_end`: Inclusive start and exclusive end in new NPZ files
+- `time_denominator`: `frame_end - frame_start - 1` (at least 1); converts normalized time to frame offsets
 - `n_keyframes`: Number of keyframes used
 - `keyframe_step`: Step between keyframes
 - `mode`: Processing mode identifier
+
+Legacy files from this repo's combiner are still accepted with their original
+inclusive end and frame-count denominator. When loading a subrange, timestamps
+and durations are renormalized together and velocities retain their physical
+displacement. Valid per-point durations are preserved in automatic mode.
 
 ### Example NPZ Creation
 
@@ -137,7 +164,10 @@ np.savez(
     colors=colors / 255.0,    # [N, 3] float32, normalized to [0, 1]
     times=times,              # [N, 1] float32, normalized to [0, 1]
     durations=durations,      # [N, 1] float32
-    has_velocity=has_velocity # [N] bool
+    has_velocity=has_velocity, # [N] bool
+    frame_start=0,
+    frame_end=61,              # exclusive
+    time_denominator=60,
 )
 ```
 
@@ -181,19 +211,21 @@ data_dir/
 
 ```bash
 bash run_pipeline.sh \
-    /path/to/triangulation/output \   # Input: per-frame NPY files
-    /path/to/colmap/data \            # COLMAP reconstruction
-    /path/to/results \                # Output directory
-    0 \                               # Start frame
-    61 \                              # End frame
-    5 \                               # Keyframe step
-    0 \                               # GPU ID
-    default_keyframe_small            # Config name
+    /path/to/triangulation/output \
+    /path/to/colmap/data \
+    /path/to/results \
+    0 61 5 0 default_keyframe_small
 ```
+
+The arguments after the paths are start frame, exclusive end frame, keyframe
+step, GPU ID, and preset. Training uses one image and timestamp per step
+(`--batch-size 1`).
 
 ### Step by Step
 
 **Step 1: Combine keyframes**
+
+The combiner's `--frame-end` is inclusive; the trainer's `--end-frame` is exclusive.
 
 ```bash
 python src/combine_frames_fast_keyframes.py \
@@ -220,8 +252,8 @@ CUDA_VISIBLE_DEVICES=0 python src/simple_trainer_freetime_4d_pure_relocation.py 
 
 | Config | Points | Description |
 |--------|--------|-------------|
-| `default_keyframe` | ~15M | Full resolution, higher quality |
-| `default_keyframe_small` | ~4M | Reduced points, faster training |
+| `default_keyframe` | All input points | No initialization downsampling |
+| `default_keyframe_small` | Up to 5M | Reduced initialization budget |
 
 ## Outputs
 
@@ -247,18 +279,7 @@ An interactive viewer for visualizing trained 4D Gaussian Splatting models with 
 
 ### Installation
 
-The viewer requires additional dependencies:
-
-```bash
-# Core dependencies
-pip install torch torchvision  # PyTorch 2.0+
-
-# Gaussian splatting backend
-pip install gsplat  # or: pip install git+https://github.com/nerfstudio-project/gsplat.git
-
-# Viewer dependencies
-pip install viser nerfview numpy
-```
+The viewer uses the same environment installed above.
 
 **Verify installation:**
 ```bash
@@ -277,6 +298,11 @@ CUDA_VISIBLE_DEVICES=0 python src/viewer_4d.py \
 ```
 
 Then open `http://localhost:8080` in your browser.
+
+New checkpoints record the frame count and velocity switch, which the viewer
+loads automatically. `--total-frames` supplies the count for legacy checkpoints.
+Checkpoints must use the documented parameters, normalized time, and exponential
+durations. Incompatible checkpoints are rejected.
 
 ### Checkpoint File Format (.pt)
 
@@ -475,6 +501,18 @@ Temporal opacity (Gaussian falloff):
 ```
 opacity(t) = exp(-0.5 * ((t - t_canonical) / duration)^2)
 ```
+## Regression checks
+
+With the runtime dependencies installed, run the CPU tests with:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+These exercise NPZ/combiner round trips, duration gradients, optimizer resume,
+relocation, checkpoint compatibility, PLY/NPZ export, and MP4 output. They do not
+replace a full scene training and quality comparison on a GPU.
+
 ## Citation
 
 If you find this work useful, please cite the original paper:

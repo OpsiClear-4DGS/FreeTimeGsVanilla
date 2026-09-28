@@ -18,11 +18,13 @@ dependencies = [
     "imageio[ffmpeg]",
     "numpy>=1.26,<2.0",
     "scikit-learn",
+    "scipy",
     "tqdm",
     "torchmetrics[image]<1.5",
     "opencv-python",
     "tyro>=0.8.8",
     "Pillow",
+    "plyfile",
     "tensorboard",
     "tensorly",
     "pyyaml",
@@ -38,6 +40,11 @@ dependencies = [
 
 [tool.uv]
 override-dependencies = ["pandas>=2.2"]
+
+[tool.uv.extra-build-dependencies]
+fused-ssim = ["torch"]
+gsplat = ["torch"]
+torch-scatter = ["torch"]
 
 [tool.uv.sources]
 pycolmap = { git = "https://github.com/JasonLSC/pycolmap.git" }

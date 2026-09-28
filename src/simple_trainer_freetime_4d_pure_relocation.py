@@ -166,7 +166,6 @@ from gsplat.rendering import rasterization
 from gsplat.strategy import DefaultStrategy, MCMCStrategy
 from gsplat.strategy.ops import _update_param_with_optimizer, remove
 from gsplat.distributed import cli
-from gsplat.optimizers import SelectiveAdam
 from gsplat.exporter import export_splats
 
 import sys
@@ -177,6 +176,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from datasets.FreeTime_dataset import FreeTimeParser, FreeTimeDataset, skip_none_collate
 from utils import knn, rgb_to_sh, set_random_seed
+from init_common import read_init_arrays, apply_scene_transform
+from freetime_ops import (
+    MIN_DURATION, temporal_opacity, positions_at_time, regularization_4d,
+    validate_vanilla_checkpoint,
+)
+from video_io import MP4Writer
 
 
 # ============================================================
@@ -276,7 +281,7 @@ class Config:
     """Starting frame index (inclusive). Time t=0 corresponds to this frame."""
 
     end_frame: int = 300
-    """Ending frame index (exclusive). Time t=1 corresponds to this frame."""
+    """Ending frame index (exclusive). Time t=1 corresponds to end_frame - 1."""
     frame_step: int = 1
     """Step between frames when loading data."""
 
@@ -373,9 +378,9 @@ class Config:
     Set to -1.0 to auto-compute from NPZ keyframe_step metadata."""
 
     auto_init_duration: bool = True
-    """Auto-compute init_duration from NPZ metadata. When True and init_duration=-1,
-    reads keyframe_step from NPZ and computes: duration = (keyframe_step / total_frames) * init_duration_multiplier.
-    This ensures proper temporal overlap between keyframes."""
+    """When init_duration is automatic, preserve valid per-point NPZ durations.
+    Fill missing durations using keyframe_step / (total_frames - 1) times
+    init_duration_multiplier."""
 
     init_duration_multiplier: float = 2.0
     """Multiplier for keyframe gap when auto-computing init_duration.
@@ -631,421 +636,86 @@ class Config:
             strategy.refine_every = int(strategy.refine_every * factor)
 
 
-def load_init_npz(
-    npz_path: str,
-    max_samples: int = 2_000_000,
-    n_times: int = 3,
-    high_velocity_ratio: float = 0.0,  # Changed from 0.8 - high values select noisy outliers
-    frame_start: int = 0,
-    frame_end: int = 300,
-    transform: Optional[np.ndarray] = None,
-) -> Dict[str, torch.Tensor]:
-    """
-    Load and sample from NPZ file with initial Gaussian data.
-
-    NPZ format (from combine_frames_with_velocity.py):
-    - positions: [N, 3] - 3D positions
-    - velocities: [N, 3] - linear velocities (vx, vy, vz) in meters/frame
-    - colors: [N, 3] - RGB colors
-    - times: [N, 1] - normalized time in [0, 1]
-    - durations: [N, 1] - temporal window widths
-
-    CRITICAL: Velocity Scaling for Normalized Time
-    -----------------------------------------------
-    The triangulation computes velocity as: v = (P2 - P1) / window_span_frames
-    This gives velocity in meters/frame.
-
-    But the trainer uses normalized time t ∈ [0, 1], so the motion equation:
-        μx(t) = μx + v · (t - μt)
-
-    If v is in m/frame and (t - μt) ≈ 1/total_frames for adjacent frames,
-    the displacement is 1/total_frames of expected!
-
-    FIX: Scale velocity by total_frames so it's in meters/normalized_time:
-        v_scaled = v_m_per_frame × total_frames
-    """
-    print(f"\n[InitNPZ] Loading: {npz_path}")
-
-    data = np.load(npz_path)
-    positions = data['positions'].astype(np.float32)
-    velocities = data['velocities'].astype(np.float32)  # [N, 3] - velocity in meters/frame (RAW)
-    colors = data['colors'].astype(np.float32)
-    times = data['times'].flatten().astype(np.float32)
-    durations = data['durations'].flatten().astype(np.float32) if 'durations' in data else np.ones_like(times) * 0.1
-
-    # Read NPZ metadata to handle frame range mismatch
-    npz_frame_start = int(data['frame_start']) if 'frame_start' in data else 0
-    npz_frame_end = int(data['frame_end']) if 'frame_end' in data else 300
-    npz_total_frames = npz_frame_end - npz_frame_start
-
-    n_total = len(positions)
-    total_frames = frame_end - frame_start
-
-    print(f"  Total points: {n_total:,}")
-    print(f"  NPZ frame range: {npz_frame_start}-{npz_frame_end} ({npz_total_frames} frames)")
-    print(f"  Requested frame range: {frame_start}-{frame_end} ({total_frames} frames)")
-    print(f"  Velocity shape: {velocities.shape} (x, y, z)")
-    print(f"  Time range (raw): [{times.min():.3f}, {times.max():.3f}]")
-
-    # =========================================================================
-    # FRAME RANGE FILTERING: If user requests subset of NPZ frames
-    # =========================================================================
-    if total_frames < npz_total_frames:
-        # Filter to points within requested frame range
-        # NPZ times are normalized to [0, 1] for npz_frame_range
-        # User's frame range as normalized time in NPZ space:
-        t_min = (frame_start - npz_frame_start) / npz_total_frames
-        t_max = (frame_end - npz_frame_start) / npz_total_frames
-
-        # Keep points where time falls within user's range (with small margin)
-        margin = 0.01
-        time_mask = (times >= t_min - margin) & (times <= t_max + margin)
-
-        print(f"\n  [Frame Filtering] Keeping points in t=[{t_min:.3f}, {t_max:.3f}]")
-        print(f"    Before: {len(positions):,} points")
-
-        positions = positions[time_mask]
-        velocities = velocities[time_mask]
-        colors = colors[time_mask]
-        times = times[time_mask]
-        durations = durations[time_mask]
-
-        print(f"    After: {len(positions):,} points")
-
-        # Rescale times from NPZ range to user's [0, 1] range
-        # new_time = (old_time - t_min) / (t_max - t_min)
-        times = (times - t_min) / (t_max - t_min + 1e-8)
-        times = np.clip(times, 0.0, 1.0)
-
-        # Rescale durations: same window in frames, but different normalized time
-        # If duration was 10/300=0.033, for 100 frames it's 10/100=0.1
-        duration_scale = npz_total_frames / total_frames
-        durations = durations * duration_scale
-
-        print(f"    Rescaled time range: [{times.min():.3f}, {times.max():.3f}]")
-        print(f"    Rescaled duration range: [{durations.min():.3f}, {durations.max():.3f}] (×{duration_scale:.1f})")
-
-        n_total = len(positions)
-
-    # =========================================================================
-    # CRITICAL FIX: Scale velocity from meters/frame to meters/normalized_time
-    # =========================================================================
-    vel_mags_raw = np.linalg.norm(velocities, axis=1)
-    print(f"\n  [Velocity Scaling] RAW velocity (meters/frame):")
-    print(f"    Range: [{vel_mags_raw.min():.6f}, {vel_mags_raw.max():.6f}]")
-    print(f"    Mean: {vel_mags_raw.mean():.6f}, Median: {np.median(vel_mags_raw):.6f}")
-
-    # Scale by total_frames to convert to meters/normalized_time
-    # v_scaled = v_m_per_frame × total_frames
-    # Now: displacement = v_scaled × (t2 - t1) where (t2-t1) = 1/total_frames for adjacent frames
-    #      displacement = v_m_per_frame × total_frames × (1/total_frames) = v_m_per_frame ✓
-    velocities = velocities * total_frames
-
-    vel_mags_scaled = np.linalg.norm(velocities, axis=1)
-    print(f"  [Velocity Scaling] SCALED velocity (meters/normalized_time, ×{total_frames}):")
-    print(f"    Range: [{vel_mags_scaled.min():.6f}, {vel_mags_scaled.max():.6f}]")
-    print(f"    Mean: {vel_mags_scaled.mean():.6f}, Median: {np.median(vel_mags_scaled):.6f}")
-
-    # Normalize colors
-    if colors.max() > 1.0:
-        colors = colors / 255.0
-
-    # Sample if needed
-    if max_samples > 0 and n_total > max_samples:
-        print(f"\n  [Sampling] Reducing {n_total:,} to {max_samples:,}")
-
-        # Get unique times
-        unique_times = np.unique(times)
-        n_available = len(unique_times)
-        actual_n_times = min(n_times, n_available)
-
-        # Select time windows evenly
-        if actual_n_times == n_available:
-            selected_times = unique_times
-        else:
-            indices = np.linspace(0, len(unique_times)-1, actual_n_times, dtype=int)
-            selected_times = unique_times[indices]
-
-        print(f"    Sampling from {actual_n_times} times: {selected_times.round(3)}")
-
-        # Compute velocity magnitudes
-        vel_mag = np.linalg.norm(velocities, axis=1)
-
-        # Sample from each time
-        samples_per_time = max_samples // actual_n_times
-        high_vel_per_time = int(samples_per_time * high_velocity_ratio)
-        spatial_per_time = samples_per_time - high_vel_per_time
-
-        all_indices = []
-        for t in selected_times:
-            t_mask = np.abs(times - t) < 0.01
-            t_indices = np.where(t_mask)[0]
-            n_at_time = len(t_indices)
-
-            if n_at_time == 0:
-                continue
-
-            # High velocity sampling
-            t_vel = vel_mag[t_indices]
-            n_high = min(high_vel_per_time, n_at_time)
-            if n_high > 0:
-                sorted_idx = np.argsort(t_vel)[::-1]
-                high_indices = t_indices[sorted_idx[:n_high]]
-                all_indices.extend(high_indices.tolist())
-
-            # Random spatial sampling for rest
-            n_spatial = min(spatial_per_time, n_at_time)
-            if n_spatial > 0:
-                remaining = np.setdiff1d(t_indices, high_indices if n_high > 0 else np.array([]))
-                if len(remaining) > 0:
-                    spatial_sample = np.random.choice(remaining, min(n_spatial, len(remaining)), replace=False)
-                    all_indices.extend(spatial_sample.tolist())
-
-        # Remove duplicates and shuffle
-        all_indices = list(set(all_indices))
-        np.random.shuffle(all_indices)
-        all_indices = np.array(all_indices[:max_samples])
-
-        positions = positions[all_indices]
-        velocities = velocities[all_indices]
-        colors = colors[all_indices]
-        times = times[all_indices]
-        durations = durations[all_indices]
-
-        print(f"    Sampled to {len(positions):,} points")
-
-    # Apply transform if provided
-    if transform is not None:
-        R = transform[:3, :3]
-        t = transform[:3, 3]
-        positions = (positions @ R.T) + t
-        # Velocities are direction vectors - only rotate, no translate
-        velocities = velocities @ R.T
-
-    # Cap velocities to reasonable range (in meters/normalized_time after scaling)
-    # A velocity of 2.0 means the object moves 2 meters total over the entire sequence
-    # This is reasonable for most dynamic scenes
-    vel_mag = np.linalg.norm(velocities, axis=1, keepdims=True)
-    max_vel = 10.0  # meters/normalized_time (total displacement over video)
-    large = vel_mag.squeeze() > max_vel
-    if large.any():
-        scale = np.clip(max_vel / (vel_mag + 1e-8), a_min=None, a_max=1.0)
-        velocities = velocities * scale
-        print(f"  [Velocity Cap] Capped {large.sum()} velocities to {max_vel} m/norm_time")
-
-    print(f"\n[InitNPZ] Final: {len(positions):,} points")
-    print(f"  Time range: [{times.min():.3f}, {times.max():.3f}]")
-    vel_mags = np.linalg.norm(velocities, axis=1)
-    print(f"  Velocity (scaled, m/norm_time): [{vel_mags.min():.6f}, {vel_mags.max():.6f}]")
-    print(f"  This means max point displacement over video: {vel_mags.max():.3f} meters")
-
+def _finish_init(arrays, indices, transform):
+    values = {key: arrays[key][indices] for key in
+              ("positions", "velocities", "colors", "times", "durations")}
+    values["positions"], values["velocities"] = apply_scene_transform(
+        values["positions"], values["velocities"], transform,
+    )
+    # Retain the original velocity-outlier cap.
+    speed = np.linalg.norm(values["velocities"], axis=1, keepdims=True)
+    values["velocities"] *= np.minimum(10.0 / np.maximum(speed, 1e-8), 1.0)
+    print(f"[InitNPZ] Loaded {len(indices):,} points")
     return {
-        'positions': torch.from_numpy(positions),
-        'velocities': torch.from_numpy(velocities),  # [N, 3] - vx, vy, vz
-        'colors': torch.from_numpy(colors),
-        'times': torch.from_numpy(times).unsqueeze(-1),
-        'durations': torch.from_numpy(durations).unsqueeze(-1),
+        key: torch.from_numpy(np.ascontiguousarray(value)).reshape(
+            -1, 1 if key in ("times", "durations") else 3
+        )
+        for key, value in values.items()
     }
+
+
+def _time_groups(times, total_frames):
+    # Group by frame, not exact float time: per-point jitter must not create
+    # millions of separate groups and a quadratic scan of the point cloud.
+    frames = np.rint(times * max(total_frames - 1, 1)).astype(np.int64)
+    order = np.argsort(frames, kind="stable")
+    _, starts = np.unique(frames[order], return_index=True)
+    return np.split(order, starts[1:])
+
+
+def _sample_groups(arrays, groups, budget, high_velocity_ratio=0.0, smart=None):
+    if budget <= 0 or budget >= sum(len(group) for group in groups):
+        return np.concatenate(groups)
+    if budget < len(groups):
+        groups = [groups[i] for i in np.linspace(0, len(groups) - 1, budget, dtype=int)]
+    selected = []
+    quota, remainder = divmod(budget, len(groups))
+    for i, group in enumerate(groups):
+        take = min(len(group), quota + (i < remainder))
+        if take == len(group):
+            chosen = group
+        elif smart is not None:
+            chosen = group[smart_sample_points(
+                arrays["positions"][group], arrays["velocities"][group],
+                arrays["colors"][group], take, seed=42 + i, **smart,
+            )]
+        else:
+            n_fast = int(take * high_velocity_ratio)
+            speed = np.linalg.norm(arrays["velocities"][group], axis=1)
+            ordered = group[np.argsort(-speed)]
+            chosen = np.concatenate([
+                ordered[:n_fast],
+                np.random.choice(ordered[n_fast:], take - n_fast, replace=False),
+            ])
+        selected.append(chosen)
+    return np.concatenate(selected)
+
+
+def load_init_npz(
+    npz_path: str, max_samples: int = 2_000_000, n_times: int = 3,
+    high_velocity_ratio: float = 0.0, frame_start: int = 0,
+    frame_end: int = 300, transform: Optional[np.ndarray] = None,
+) -> Dict[str, torch.Tensor]:
+    """Load normalized-time initialization, sampling evenly spaced frame groups."""
+    if n_times < 1 or not 0 <= high_velocity_ratio <= 1:
+        raise ValueError("n_times must be positive and high_velocity_ratio in [0, 1]")
+    arrays = read_init_arrays(npz_path, frame_start, frame_end)
+    groups = _time_groups(arrays["times"], frame_end - frame_start)
+    if 0 < max_samples < len(arrays["times"]) and n_times < len(groups):
+        groups = [groups[i] for i in np.linspace(0, len(groups) - 1, n_times, dtype=int)]
+    indices = _sample_groups(arrays, groups, max_samples, high_velocity_ratio)
+    return _finish_init(arrays, indices, transform)
 
 
 def load_init_npz_stratified(
-    npz_path: str,
-    max_samples: int = 4_000_000,
-    frame_start: int = 0,
-    frame_end: int = 300,
-    transform: Optional[np.ndarray] = None,
+    npz_path: str, max_samples: int = 4_000_000, frame_start: int = 0,
+    frame_end: int = 300, transform: Optional[np.ndarray] = None,
 ) -> Dict[str, torch.Tensor]:
-    """
-    Load and sample from NPZ using per-frame stratified sampling.
-
-    This is the "Paper-Pure" approach:
-    - Sample equally from ALL frames (not just high-velocity regions)
-    - Guarantees temporal coverage: every frame has representation
-    - No bias toward noisy high-velocity outliers
-
-    Strategy:
-    - Divide max_samples evenly across all unique time values
-    - Within each time: 50% highest velocity (structure), 50% random (background)
-    - This ensures every frame has the same number of initial points
-
-    Args:
-        npz_path: Path to init NPZ file
-        max_samples: Total number of points to sample (e.g., 4M for 4M budget)
-        frame_start: Start frame for training
-        frame_end: End frame for training
-        transform: Optional 4x4 transform to apply to positions/velocities
-
-    Returns:
-        Dictionary with positions, velocities, colors, times, durations
-    """
-    print(f"\n{'='*60}")
-    print("[STRATIFIED SAMPLING] Per-Frame Uniform Distribution")
-    print(f"{'='*60}")
-    print(f"Loading: {npz_path}")
-
-    data = np.load(npz_path)
-    positions = data['positions'].astype(np.float32)
-    velocities = data['velocities'].astype(np.float32)
-    colors = data['colors'].astype(np.float32)
-    times = data['times'].flatten().astype(np.float32)
-    durations = data['durations'].flatten().astype(np.float32) if 'durations' in data else np.ones_like(times) * 0.1
-
-    # Read NPZ metadata
-    npz_frame_start = int(data['frame_start']) if 'frame_start' in data else 0
-    npz_frame_end = int(data['frame_end']) if 'frame_end' in data else 300
-    npz_total_frames = npz_frame_end - npz_frame_start
-
-    n_total = len(positions)
-    total_frames = frame_end - frame_start
-
-    print(f"\n  Total points in NPZ: {n_total:,}")
-    print(f"  NPZ frame range: {npz_frame_start}-{npz_frame_end} ({npz_total_frames} frames)")
-    print(f"  Requested frame range: {frame_start}-{frame_end} ({total_frames} frames)")
-
-    # =========================================================================
-    # FRAME RANGE FILTERING (if training on subset of NPZ frames)
-    # =========================================================================
-    if total_frames < npz_total_frames:
-        t_min = (frame_start - npz_frame_start) / npz_total_frames
-        t_max = (frame_end - npz_frame_start) / npz_total_frames
-
-        margin = 0.01
-        time_mask = (times >= t_min - margin) & (times <= t_max + margin)
-
-        print(f"\n  [Frame Filtering] Keeping points in t=[{t_min:.3f}, {t_max:.3f}]")
-        print(f"    Before: {len(positions):,} points")
-
-        positions = positions[time_mask]
-        velocities = velocities[time_mask]
-        colors = colors[time_mask]
-        times = times[time_mask]
-        durations = durations[time_mask]
-
-        print(f"    After: {len(positions):,} points")
-
-        # Rescale times to [0, 1]
-        times = (times - t_min) / (t_max - t_min + 1e-8)
-        times = np.clip(times, 0.0, 1.0)
-
-        # Rescale durations
-        duration_scale = npz_total_frames / total_frames
-        durations = durations * duration_scale
-
-        print(f"    Rescaled time range: [{times.min():.3f}, {times.max():.3f}]")
-
-        n_total = len(positions)
-
-    # =========================================================================
-    # VELOCITY SCALING: meters/frame → meters/normalized_time
-    # =========================================================================
-    velocities = velocities * total_frames
-    vel_mags = np.linalg.norm(velocities, axis=1)
-    print(f"\n  Velocity (scaled): [{vel_mags.min():.4f}, {vel_mags.max():.4f}]")
-
-    # Normalize colors
-    if colors.max() > 1.0:
-        colors = colors / 255.0
-
-    # =========================================================================
-    # STRATIFIED SAMPLING: Equal points per time window
-    # =========================================================================
-    unique_times = np.unique(times)
-    n_time_windows = len(unique_times)
-
-    print(f"\n  [Stratified Sampling]")
-    print(f"    Unique time windows: {n_time_windows}")
-    print(f"    Target samples: {max_samples:,}")
-
-    samples_per_frame = max_samples // n_time_windows
-
-    print(f"    Samples per frame: ~{samples_per_frame:,}")
-
-    all_indices = []
-
-    for t_val in unique_times:
-        # Find points at this time
-        frame_mask = np.abs(times - t_val) < 0.005
-        frame_indices = np.where(frame_mask)[0]
-        n_at_frame = len(frame_indices)
-
-        if n_at_frame == 0:
-            continue
-
-        if n_at_frame <= samples_per_frame:
-            # Keep all points if frame has fewer than quota
-            all_indices.extend(frame_indices.tolist())
-        else:
-            # Split: 50% highest velocity (motion structure), 50% random (background)
-            n_vel = samples_per_frame // 2
-            n_rand = samples_per_frame - n_vel
-
-            # Sort by velocity (descending)
-            frame_vels = np.linalg.norm(velocities[frame_indices], axis=1)
-            sorted_local_idx = np.argsort(frame_vels)[::-1]
-
-            # Top velocity indices
-            top_vel_indices = frame_indices[sorted_local_idx[:n_vel]]
-
-            # Random from remaining
-            remaining_pool = frame_indices[sorted_local_idx[n_vel:]]
-            if len(remaining_pool) > n_rand:
-                rand_indices = np.random.choice(remaining_pool, n_rand, replace=False)
-            else:
-                rand_indices = remaining_pool
-
-            all_indices.extend(top_vel_indices.tolist())
-            all_indices.extend(rand_indices.tolist())
-
-    # Remove duplicates (shouldn't be any but safety)
-    all_indices = list(set(all_indices))
-    np.random.shuffle(all_indices)
-
-    # Trim to max_samples
-    if len(all_indices) > max_samples:
-        all_indices = all_indices[:max_samples]
-
-    all_indices = np.array(all_indices, dtype=np.int64)
-
-    positions = positions[all_indices]
-    velocities = velocities[all_indices]
-    colors = colors[all_indices]
-    times = times[all_indices]
-    durations = durations[all_indices]
-
-    print(f"\n  Final sampled points: {len(positions):,}")
-
-    # Verify temporal distribution
-    unique_sampled_times = np.unique(times)
-    print(f"  Time windows represented: {len(unique_sampled_times)}/{n_time_windows}")
-
-    # Apply transform
-    if transform is not None:
-        R = transform[:3, :3]
-        t = transform[:3, 3]
-        positions = (positions @ R.T) + t
-        velocities = velocities @ R.T
-
-    # Cap velocities
-    vel_mag = np.linalg.norm(velocities, axis=1, keepdims=True)
-    max_vel = 10.0
-    large = vel_mag.squeeze() > max_vel
-    if large.any():
-        scale = np.clip(max_vel / (vel_mag + 1e-8), a_min=None, a_max=1.0)
-        velocities = velocities * scale
-        print(f"  [Velocity Cap] Capped {large.sum()} velocities to {max_vel}")
-
-    vel_mags = np.linalg.norm(velocities, axis=1)
-    print(f"\n  Final velocity range: [{vel_mags.min():.4f}, {vel_mags.max():.4f}]")
-    print(f"  Max displacement over video: {vel_mags.max():.3f} meters")
-    print(f"{'='*60}\n")
-
-    return {
-        'positions': torch.from_numpy(positions),
-        'velocities': torch.from_numpy(velocities),
-        'colors': torch.from_numpy(colors),
-        'times': torch.from_numpy(times).unsqueeze(-1),
-        'durations': torch.from_numpy(durations).unsqueeze(-1),
-    }
+    """Keep the original per-frame, half-high-velocity sampling policy."""
+    arrays = read_init_arrays(npz_path, frame_start, frame_end)
+    groups = _time_groups(arrays["times"], frame_end - frame_start)
+    indices = _sample_groups(arrays, groups, max_samples, high_velocity_ratio=0.5)
+    return _finish_init(arrays, indices, transform)
 
 
 def estimate_voxel_size(positions: np.ndarray, sample_size: int = 10000, k_neighbors: int = 5) -> float:
@@ -1110,8 +780,7 @@ def smart_sample_points(
     if n_points <= target_count:
         return np.arange(n_points)
 
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.RandomState(seed) if seed is not None else np.random
 
     # --- 1. Density Weights (Voxel Hashing) ---
     voxel_indices = np.floor(positions / voxel_size).astype(np.int64)
@@ -1145,289 +814,72 @@ def smart_sample_points(
     probs = w_density * w_velocity * w_center
     probs = probs / probs.sum()
 
-    selected_indices = np.random.choice(
+    selected_indices = rng.choice(
         n_points, size=target_count, replace=False, p=probs
     )
     return selected_indices
 
 
 def load_init_npz_keyframe(
-    npz_path: str,
-    max_samples: int = 8_000_000,
-    keyframe_step: int = -1,
-    frame_start: int = 0,
-    frame_end: int = 300,
-    transform: Optional[np.ndarray] = None,
-    init_duration: float = -1.0,
-    init_duration_multiplier: float = 2.0,
-    use_smart_sampling: bool = True,
-    smart_voxel_size: float = -1.0,
-    smart_velocity_weight: float = 5.0,
+    npz_path: str, max_samples: int = 8_000_000, keyframe_step: int = -1,
+    frame_start: int = 0, frame_end: int = 300,
+    transform: Optional[np.ndarray] = None, init_duration: float = -1.0,
+    init_duration_multiplier: float = 2.0, use_smart_sampling: bool = True,
+    smart_voxel_size: float = -1.0, smart_velocity_weight: float = 5.0,
     smart_center_weight: float = 2.0,
 ) -> Dict[str, torch.Tensor]:
-    """
-    Load and sample DENSELY from KEYFRAMES only (Budget-Efficient approach).
-
-    The Strategy: Dense Keyframes + Velocity Bridging
-    -------------------------------------------------
-    Instead of sparse sampling across all frames (Budget/Coverage trade-off),
-    we sample DENSELY from keyframes and rely on velocity to fill gaps.
-
-    Example with 8M budget, 300 frames, keyframe_step=5:
-    - Uniform approach: 8M / 300 = 26,667 points per frame (TOO SPARSE!)
-    - Keyframe approach: 8M / 60 keyframes = 133,333 points per keyframe (DENSE!)
-
-    The velocity vector v carries the dense keyframe points across the 5-frame gap.
-    The duration s ensures temporal overlap between adjacent keyframes.
-
-    Args:
-        npz_path: Path to init NPZ file with all frames
-        max_samples: Total budget (e.g., 8M). Set to 0 or negative to use ALL points.
-        keyframe_step: Step between keyframes. Set to -1 to auto-read from NPZ metadata.
-        frame_start: Start frame for training
-        frame_end: End frame for training
-        transform: Optional 4x4 transform
-        init_duration: Duration for each Gaussian. Set to -1 to auto-compute from keyframe_step.
-        init_duration_multiplier: Multiplier for keyframe gap when auto-computing duration.
-        use_smart_sampling: Use smart sampling (density/velocity/center weighted) instead of uniform.
-        smart_voxel_size: Voxel size for density estimation. -1 to auto-estimate.
-        smart_velocity_weight: Velocity weight for smart sampling (moving points get boosted).
-        smart_center_weight: Center focus weight for smart sampling.
-
-    Returns:
-        Dictionary with positions, velocities, colors, times, durations
-    """
-    print(f"\n{'='*70}")
-    print("[KEYFRAME SAMPLING] Dense Keyframes + Velocity Bridging")
-    print(f"{'='*70}")
-    print(f"Loading: {npz_path}")
-
-    data = np.load(npz_path)
-    positions = data['positions'].astype(np.float32)
-    velocities = data['velocities'].astype(np.float32)
-    colors = data['colors'].astype(np.float32)
-    times = data['times'].flatten().astype(np.float32)
-    durations_npz = data['durations'].flatten().astype(np.float32) if 'durations' in data else np.ones_like(times) * 0.1
-
-    # Read NPZ metadata
-    npz_frame_start = int(data['frame_start']) if 'frame_start' in data else 0
-    npz_frame_end = int(data['frame_end']) if 'frame_end' in data else 300
-    npz_total_frames = npz_frame_end - npz_frame_start
-
-    # Read keyframe_step from NPZ metadata if not explicitly provided
-    npz_keyframe_step = int(data['keyframe_step']) if 'keyframe_step' in data else 5
-    if keyframe_step < 0:
-        keyframe_step = npz_keyframe_step
-        print(f"  [AUTO] Using keyframe_step from NPZ metadata: {keyframe_step}")
+    """Sample the available keyframes, preserving usable per-point durations."""
+    arrays = read_init_arrays(npz_path, frame_start, frame_end)
+    step = keyframe_step if keyframe_step > 0 else arrays["keyframe_step"]
+    if step <= 0 or init_duration_multiplier <= 0:
+        raise ValueError("keyframe_step and init_duration_multiplier must be positive")
+    fallback = step / max(frame_end - frame_start - 1, 1) * init_duration_multiplier
+    if init_duration > 0:
+        arrays["durations"].fill(init_duration)
+    elif not arrays["has_durations"]:
+        arrays["durations"].fill(fallback)
     else:
-        print(f"  [EXPLICIT] Using keyframe_step from config: {keyframe_step}")
-        if keyframe_step != npz_keyframe_step:
-            print(f"  [WARNING] Config keyframe_step ({keyframe_step}) differs from NPZ ({npz_keyframe_step})")
+        arrays["durations"] = np.where(arrays["durations"] > 0, arrays["durations"], fallback)
+    groups = _time_groups(arrays["times"], frame_end - frame_start)
+    smart = None
+    if use_smart_sampling and 0 < max_samples < len(arrays["times"]):
+        smart = dict(
+            voxel_size=(smart_voxel_size if smart_voxel_size > 0
+                        else estimate_voxel_size(arrays["positions"])),
+            velocity_weight=smart_velocity_weight, center_weight=smart_center_weight,
+        )
+    indices = _sample_groups(arrays, groups, max_samples, smart=smart)
+    return _finish_init(arrays, indices, transform)
 
-    n_total = len(positions)
-    total_frames = frame_end - frame_start
 
-    print(f"\n  Total points in NPZ: {n_total:,}")
-    print(f"  NPZ frame range: {npz_frame_start}-{npz_frame_end} ({npz_total_frames} frames)")
-    print(f"  NPZ keyframe_step: {npz_keyframe_step}")
-    print(f"  Requested frame range: {frame_start}-{frame_end} ({total_frames} frames)")
-    print(f"  Effective keyframe_step: {keyframe_step}")
+def resolve_init_duration(cfg: Config, durations: Tensor) -> float:
+    """Resolve the auto sentinel before it enters log-duration or loss math."""
+    if cfg.init_duration > 0:
+        return float(cfg.init_duration)
+    usable = durations[torch.isfinite(durations) & (durations > 0)]
+    if usable.numel():
+        return max(float(usable.median()), MIN_DURATION)
+    step = cfg.keyframe_step if cfg.keyframe_step > 0 else 1
+    return max(step / max(cfg.end_frame - cfg.start_frame - 1, 1)
+               * cfg.init_duration_multiplier, MIN_DURATION)
 
-    # =========================================================================
-    # COMPUTE KEYFRAMES
-    # =========================================================================
-    # Keyframes are at indices: 0, keyframe_step, 2*keyframe_step, ...
-    n_keyframes = (total_frames + keyframe_step - 1) // keyframe_step
-    keyframe_indices = np.arange(0, total_frames, keyframe_step)
-    keyframe_times = keyframe_indices / (total_frames - 1) if total_frames > 1 else np.array([0.0])
 
-    print(f"\n  [Keyframe Strategy]")
-    print(f"    Total frames: {total_frames}")
-    print(f"    Number of keyframes: {n_keyframes}")
-    print(f"    Keyframe indices: {keyframe_indices[:10]}{'...' if len(keyframe_indices) > 10 else ''}")
-    print(f"    Keyframe times: {keyframe_times[:10].round(3)}{'...' if len(keyframe_times) > 10 else ''}")
-
-    # Gap between keyframes in normalized time
-    keyframe_gap = keyframe_step / total_frames
-
-    # Auto-compute init_duration if set to -1
-    if init_duration < 0:
-        init_duration = keyframe_gap * init_duration_multiplier
-        print(f"\n  [AUTO DURATION] Computing from NPZ metadata:")
-        print(f"    keyframe_gap = {keyframe_step} / {total_frames} = {keyframe_gap:.4f}")
-        print(f"    init_duration = {keyframe_gap:.4f} * {init_duration_multiplier} = {init_duration:.4f}")
-    else:
-        print(f"\n  [EXPLICIT DURATION] Using init_duration from config: {init_duration:.4f}")
-
-    print(f"    Keyframe gap (normalized): {keyframe_gap:.4f}")
-    print(f"    Final init_duration: {init_duration:.4f}")
-    print(f"    Duration covers {init_duration / keyframe_gap:.1f}x the keyframe gap")
-
-    # Budget per keyframe (only relevant if sampling)
-    if max_samples > 0:
-        budget_per_keyframe = max_samples // max(n_keyframes, 1)
-        print(f"\n    Budget: {max_samples:,} total")
-        print(f"    Points per keyframe: {budget_per_keyframe:,}")
-    else:
-        print(f"\n    Budget: UNLIMITED (using all points)")
-
-    # =========================================================================
-    # FRAME RANGE FILTERING (if training on subset of NPZ frames)
-    # =========================================================================
-    if total_frames < npz_total_frames:
-        t_min = (frame_start - npz_frame_start) / npz_total_frames
-        t_max = (frame_end - npz_frame_start) / npz_total_frames
-
-        margin = 0.01
-        time_mask = (times >= t_min - margin) & (times <= t_max + margin)
-
-        print(f"\n  [Frame Filtering] Keeping points in t=[{t_min:.3f}, {t_max:.3f}]")
-        print(f"    Before: {len(positions):,} points")
-
-        positions = positions[time_mask]
-        velocities = velocities[time_mask]
-        colors = colors[time_mask]
-        times = times[time_mask]
-        durations_npz = durations_npz[time_mask]
-
-        print(f"    After: {len(positions):,} points")
-
-        # Rescale times to [0, 1]
-        times = (times - t_min) / (t_max - t_min + 1e-8)
-        times = np.clip(times, 0.0, 1.0)
-
-        n_total = len(positions)
-
-    # =========================================================================
-    # VELOCITY SCALING: meters/frame → meters/normalized_time
-    # =========================================================================
-    velocities = velocities * total_frames
-    vel_mags = np.linalg.norm(velocities, axis=1)
-    print(f"\n  Velocity (scaled): [{vel_mags.min():.4f}, {vel_mags.max():.4f}]")
-
-    # Normalize colors
-    if colors.max() > 1.0:
-        colors = colors / 255.0
-
-    # =========================================================================
-    # KEYFRAME SAMPLING: Smart or uniform sampling per keyframe
-    # =========================================================================
-    sampling_method = "SMART (density/velocity/center weighted)" if use_smart_sampling else "UNIFORM RANDOM"
-    print(f"\n  [Keyframe Sampling - {sampling_method}]")
-
-    # Group points by their unique time values (each time = one keyframe)
-    unique_times = np.unique(times)
-    n_actual_keyframes = len(unique_times)
-    print(f"    Unique keyframe times in NPZ: {n_actual_keyframes}")
-
-    # Auto-estimate voxel size if needed (for smart sampling)
-    if use_smart_sampling and smart_voxel_size < 0:
-        smart_voxel_size = estimate_voxel_size(positions)
-        print(f"    Auto voxel size: {smart_voxel_size:.4f}m")
-    elif use_smart_sampling:
-        print(f"    Voxel size: {smart_voxel_size:.4f}m")
-
-    # Check if sampling is needed (max_samples <= 0 means no sampling)
-    if max_samples <= 0 or n_total <= max_samples:
-        if max_samples <= 0:
-            print(f"    NO SAMPLING (max_samples={max_samples})")
-        else:
-            print(f"    Total points ({n_total:,}) <= max_samples ({max_samples:,})")
-        print(f"    Using ALL {n_total:,} points without sampling")
-        all_indices = np.arange(n_total)
-        actual_samples_per_kf = []
-        for ut in unique_times:
-            actual_samples_per_kf.append((times == ut).sum())
-    else:
-        # Sample fixed budget per keyframe
-        budget_per_keyframe = max_samples // n_actual_keyframes
-        print(f"    Sampling {budget_per_keyframe:,} points per keyframe")
-        if use_smart_sampling:
-            print(f"    Velocity weight: {smart_velocity_weight}, Center weight: {smart_center_weight}")
-
-        all_indices = []
-        actual_samples_per_kf = []
-
-        for i, ut in enumerate(unique_times):
-            frame_mask = times == ut
-            frame_indices = np.where(frame_mask)[0]
-            n_at_frame = len(frame_indices)
-
-            if n_at_frame <= budget_per_keyframe:
-                # Keep all points
-                selected = frame_indices
-            elif use_smart_sampling:
-                # Smart sampling: density/velocity/center weighted
-                frame_positions = positions[frame_indices]
-                frame_velocities = velocities[frame_indices]
-                frame_colors = colors[frame_indices]
-
-                local_selected = smart_sample_points(
-                    frame_positions,
-                    frame_velocities,
-                    frame_colors,
-                    target_count=budget_per_keyframe,
-                    voxel_size=smart_voxel_size,
-                    velocity_weight=smart_velocity_weight,
-                    center_weight=smart_center_weight,
-                    seed=42 + i,  # Different seed per keyframe for variety
-                )
-                selected = frame_indices[local_selected]
-            else:
-                # Uniform random sampling
-                selected = np.random.choice(frame_indices, budget_per_keyframe, replace=False)
-
-            all_indices.extend(selected.tolist())
-            actual_samples_per_kf.append(len(selected))
-
-        all_indices = np.array(all_indices, dtype=np.int64)
-
-    positions = positions[all_indices]
-    velocities = velocities[all_indices]
-    colors = colors[all_indices]
-    times = times[all_indices]
-    # Override durations with init_duration for proper temporal bridging
-    durations = np.ones(len(positions), dtype=np.float32) * init_duration
-
-    print(f"\n  Final sampled points: {len(positions):,}")
-    print(f"  Keyframes sampled: {len(actual_samples_per_kf)}/{n_actual_keyframes}")
-    print(f"  Avg points per keyframe: {np.mean(actual_samples_per_kf):,.0f}")
-    print(f"  Min/Max per keyframe: {np.min(actual_samples_per_kf):,} / {np.max(actual_samples_per_kf):,}")
-
-    # Verify temporal distribution
-    unique_sampled_times = np.unique(np.round(times, 3))
-    print(f"  Unique time values: {len(unique_sampled_times)}")
-
-    # Apply transform
-    if transform is not None:
-        R = transform[:3, :3]
-        t = transform[:3, 3]
-        positions = (positions @ R.T) + t
-        velocities = velocities @ R.T
-
-    # Cap velocities
-    vel_mag = np.linalg.norm(velocities, axis=1, keepdims=True)
-    max_vel = 10.0
-    large = vel_mag.squeeze() > max_vel
-    if large.any():
-        scale = np.clip(max_vel / (vel_mag + 1e-8), a_min=None, a_max=1.0)
-        velocities = velocities * scale
-        print(f"  [Velocity Cap] Capped {large.sum()} velocities to {max_vel}")
-
-    vel_mags = np.linalg.norm(velocities, axis=1)
-    print(f"\n  Final velocity range: [{vel_mags.min():.4f}, {vel_mags.max():.4f}]")
-    print(f"  Max displacement over video: {vel_mags.max():.3f} meters")
-    print(f"\n  [Velocity Bridging] Each keyframe's points will travel:")
-    print(f"    Over {keyframe_step} frames: v * {keyframe_gap:.4f} normalized time")
-    print(f"    With duration={init_duration:.4f}, overlap with next keyframe: {(init_duration - keyframe_gap) / keyframe_gap * 100:.0f}% of gap")
-    print(f"{'='*70}\n")
-
+def create_optimizers(cfg: Config, splats, scene_scale: float):
+    """Use the same optimizer type and batch scaling for initialization and resume."""
+    lrs = dict(
+        means=cfg.position_lr * scene_scale, scales=cfg.scales_lr,
+        quats=cfg.quats_lr, opacities=cfg.opacities_lr, sh0=cfg.sh0_lr,
+        shN=cfg.shN_lr, times=cfg.times_lr, durations=cfg.durations_lr,
+        velocities=cfg.velocity_lr_start,
+    )
+    bs = cfg.batch_size
     return {
-        'positions': torch.from_numpy(positions),
-        'velocities': torch.from_numpy(velocities),
-        'colors': torch.from_numpy(colors),
-        'times': torch.from_numpy(times).unsqueeze(-1),
-        'durations': torch.from_numpy(durations).unsqueeze(-1),
+        name: torch.optim.Adam(
+            [{"params": parameter, "lr": lrs[name] * math.sqrt(bs), "name": name}],
+            eps=1e-15 / math.sqrt(bs),
+            betas=(1 - bs * (1 - 0.9), 1 - bs * (1 - 0.999)),
+        )
+        for name, parameter in splats.items()
     }
 
 
@@ -1465,55 +917,37 @@ def create_splats_with_optimizers_4d(
     scales = torch.log(dist_avg * cfg.init_scale).unsqueeze(-1).repeat(1, 3)
 
     # Initialize parameters
-    quats = torch.rand((N, 4))
+    quats = torch.zeros((N, 4))
+    quats[:, 0] = 1.0
     opacities = torch.logit(torch.full((N,), cfg.init_opacity))
 
-    # Durations: Use larger default to ensure temporal coverage
-    # NPZ durations are often too small (window_size/total_frames), causing black frames
-    # A duration of 0.2 means each Gaussian is visible for ~20% of the sequence
-    # which provides good overlap between time samples
-    min_duration = cfg.init_duration  # Default 0.2
-    if durations.min() > 0:
-        # Use max of NPZ duration and min_duration to ensure coverage
-        durations_clamped = torch.clamp(durations, min=min_duration)
-        log_durations = torch.log(durations_clamped)
-        print(f"[Init] NPZ durations: [{durations.min():.3f}, {durations.max():.3f}]")
-        print(f"[Init] Using clamped durations: [{durations_clamped.min():.3f}, {durations_clamped.max():.3f}]")
-    else:
-        log_durations = torch.log(torch.full((N, 1), min_duration))
-        print(f"[Init] Using config init_duration: {min_duration}")
+    fallback_duration = resolve_init_duration(cfg, durations)
+    durations = torch.where(
+        torch.isfinite(durations) & (durations > 0), durations,
+        torch.full_like(durations, fallback_duration),
+    )
+    if cfg.init_duration > 0:
+        durations = durations.clamp_min(cfg.init_duration)
+    log_durations = durations.clamp_min(MIN_DURATION).log()
 
     # SH colors
     sh_colors = torch.zeros((N, (cfg.sh_degree + 1) ** 2, 3))
     sh_colors[:, 0, :] = rgb_to_sh(colors)
 
     # Create parameter dict
-    params = [
-        # name, value, lr
-        ("means", torch.nn.Parameter(points), cfg.position_lr * scene_scale),
-        ("scales", torch.nn.Parameter(scales), cfg.scales_lr),
-        ("quats", torch.nn.Parameter(quats), cfg.quats_lr),
-        ("opacities", torch.nn.Parameter(opacities), cfg.opacities_lr),
-        ("sh0", torch.nn.Parameter(sh_colors[:, :1, :]), cfg.sh0_lr),
-        ("shN", torch.nn.Parameter(sh_colors[:, 1:, :]), cfg.shN_lr),
-        # Temporal parameters
-        ("times", torch.nn.Parameter(times), cfg.times_lr),
-        ("durations", torch.nn.Parameter(log_durations), cfg.durations_lr),
-        ("velocities", torch.nn.Parameter(velocities), cfg.velocity_lr_start),
-    ]
+    splats = torch.nn.ParameterDict({
+        "means": torch.nn.Parameter(points),
+        "scales": torch.nn.Parameter(scales),
+        "quats": torch.nn.Parameter(quats),
+        "opacities": torch.nn.Parameter(opacities),
+        "sh0": torch.nn.Parameter(sh_colors[:, :1, :]),
+        "shN": torch.nn.Parameter(sh_colors[:, 1:, :]),
+        "times": torch.nn.Parameter(times),
+        "durations": torch.nn.Parameter(log_durations),
+        "velocities": torch.nn.Parameter(velocities),
+    }).to(device)
 
-    splats = torch.nn.ParameterDict({n: v for n, v, _ in params}).to(device)
-
-    # Create optimizers with batch size scaling
-    BS = cfg.batch_size
-    optimizers = {
-        name: torch.optim.Adam(
-            [{"params": splats[name], "lr": lr * math.sqrt(BS), "name": name}],
-            eps=1e-15 / math.sqrt(BS),
-            betas=(1 - BS * (1 - 0.9), 1 - BS * (1 - 0.999)),
-        )
-        for name, _, lr in params
-    }
+    optimizers = create_optimizers(cfg, splats, scene_scale)
 
     return splats, optimizers
 
@@ -1522,6 +956,10 @@ class FreeTime4DRunner:
     """FreeTimeGS 4D Gaussian Splatting Trainer."""
 
     def __init__(self, local_rank: int, world_rank: int, world_size: int, cfg: Config):
+        if cfg.batch_size != 1:
+            raise ValueError("Vanilla training requires batch_size=1; frames have independent timestamps")
+        if cfg.end_frame <= cfg.start_frame or cfg.test_every < 1:
+            raise ValueError("A nonempty frame range and positive test_every are required")
         set_random_seed(42 + local_rank)
 
         self.cfg = cfg
@@ -1619,16 +1057,9 @@ class FreeTime4DRunner:
                 transform=transform,
             )
 
-        # Filter distant points
-        points = init_data['positions']
-        max_dist = 5.0 * self.scene_scale
-        dists = torch.norm(points, dim=1)
-        valid = dists < max_dist
-
-        for key in init_data:
-            init_data[key] = init_data[key][valid]
-
-        print(f"[FreeTime4D] After filtering: {len(init_data['positions']):,} Gaussians")
+        # Camera-rig extent does not bound the geometry visible to the cameras.
+        # Keep distant initialization points rather than deleting valid content.
+        self.effective_init_duration = resolve_init_duration(cfg, init_data["durations"])
 
         # Create splats and optimizers
         self.splats, self.optimizers = create_splats_with_optimizers_4d(
@@ -1652,10 +1083,9 @@ class FreeTime4DRunner:
         # Losses
         self.psnr = PeakSignalNoiseRatio(data_range=1.0).to(self.device)
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
-        if cfg.lpips_net == "alex":
-            self.lpips = LearnedPerceptualImagePatchSimilarity(net_type="alex", normalize=True).to(self.device)
-        else:
-            self.lpips = LearnedPerceptualImagePatchSimilarity(net_type="vgg", normalize=False).to(self.device)
+        self.lpips = LearnedPerceptualImagePatchSimilarity(
+            net_type=cfg.lpips_net, normalize=True,
+        ).to(self.device)
 
         # Track starting step for resume
         self.start_step = 0
@@ -1671,7 +1101,9 @@ class FreeTime4DRunner:
         if not os.path.exists(ckpt_path):
             raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-        ckpt = torch.load(ckpt_path, map_location=self.device)
+        ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
+        validate_vanilla_checkpoint(ckpt)
+        self.cfg.use_velocity = bool(ckpt.get("use_velocity", self.cfg.use_velocity))
 
         # Reinitialize splats from checkpoint (handles size mismatch from densification)
         ckpt_splats = ckpt["splats"]
@@ -1690,6 +1122,7 @@ class FreeTime4DRunner:
             "durations": torch.nn.Parameter(ckpt_splats["durations"]),
             "velocities": torch.nn.Parameter(ckpt_splats["velocities"]),
         }).to(self.device)
+        self._project_temporal_params()
         print(f"  Loaded {len(self.splats['means']):,} Gaussians")
 
         # Set start step for resume
@@ -1703,17 +1136,7 @@ class FreeTime4DRunner:
         # Reinitialize optimizers for the new splats (needed for resume training)
         if not self.cfg.export_only:
             cfg = self.cfg
-            self.optimizers = {
-                "means": SelectiveAdam([{"params": self.splats["means"], "lr": cfg.position_lr, "name": "means"}], eps=1e-15),
-                "scales": SelectiveAdam([{"params": self.splats["scales"], "lr": cfg.scales_lr, "name": "scales"}], eps=1e-15),
-                "quats": SelectiveAdam([{"params": self.splats["quats"], "lr": cfg.quats_lr, "name": "quats"}], eps=1e-15),
-                "opacities": SelectiveAdam([{"params": self.splats["opacities"], "lr": cfg.opacities_lr, "name": "opacities"}], eps=1e-15),
-                "sh0": SelectiveAdam([{"params": self.splats["sh0"], "lr": cfg.sh0_lr, "name": "sh0"}], eps=1e-15),
-                "shN": SelectiveAdam([{"params": self.splats["shN"], "lr": cfg.shN_lr, "name": "shN"}], eps=1e-15),
-                "times": SelectiveAdam([{"params": self.splats["times"], "lr": cfg.times_lr, "name": "times"}], eps=1e-15),
-                "durations": SelectiveAdam([{"params": self.splats["durations"], "lr": cfg.durations_lr, "name": "durations"}], eps=1e-15),
-                "velocities": SelectiveAdam([{"params": self.splats["velocities"], "lr": cfg.velocity_lr_start, "name": "velocities"}], eps=1e-15),
-            }
+            self.optimizers = create_optimizers(cfg, self.splats, self.scene_scale)
 
             # Load optimizer states if available
             if "optimizers" in ckpt:
@@ -1919,48 +1342,20 @@ class FreeTime4DRunner:
         return duration_img, velocity_img
 
     def compute_temporal_opacity(self, t: float) -> Tensor:
-        """
-        Temporal opacity: σ(t) = exp(-0.5 * ((t - µt) / s)^2)
+        return temporal_opacity(self.splats["times"], self.splats["durations"], t)
 
-        Paper equation for temporal Gaussian distribution.
-        """
-        mu_t = self.splats["times"]  # [N, 1]
-        s = torch.exp(self.splats["durations"])  # [N, 1] - duration in original space
-        # Clamp duration to prevent collapse (min 0.02 = visible for ~2% of video)
-        s = torch.clamp(s, min=0.02)
-        return torch.exp(-0.5 * ((t - mu_t) / (s + 1e-8)) ** 2).squeeze(-1)  # [N]
+    @torch.no_grad()
+    def _project_temporal_params(self):
+        self.splats["durations"].clamp_(min=math.log(MIN_DURATION))
 
     def compute_positions_at_time(self, t: float) -> Tensor:
-        """
-        Position at time t: µx(t) = µx + v · (t - µt)
+        return positions_at_time(
+            self.splats["means"], self.splats["velocities"], self.splats["times"],
+            t, self.cfg.use_velocity,
+        )
 
-        Paper equation for linear velocity model.
-        When use_velocity=False, returns static positions (µx).
-        """
-        mu_x = self.splats["means"]  # [N, 3]
-
-        if not self.cfg.use_velocity:
-            # Static mode: no motion, just temporal opacity
-            return mu_x
-
-        mu_t = self.splats["times"]  # [N, 1]
-        v = self.splats["velocities"]  # [N, 3]
-        return mu_x + v * (t - mu_t)  # [N, 3]
-
-    def compute_4d_regularization(self, temporal_opacity: Tensor) -> Tensor:
-        """
-        4D Regularization: Lreg(t) = (1/N) * Σ(σ * sg[σ(t)])
-
-        From paper: Uses stop-gradient on temporal opacity to prevent minimizing it.
-        This encourages Gaussians to have high opacity at their canonical time
-        without collapsing temporal opacity to zero.
-        """
-        base_opacity = torch.sigmoid(self.splats["opacities"])  # [N]
-        # Stop-gradient on temporal opacity - only backprop through base opacity
-        temporal_opa_sg = temporal_opacity.detach()  # sg[σ(t)]
-        # Regularization: mean of (σ * sg[σ(t)])
-        reg = (base_opacity * temporal_opa_sg).mean()
-        return reg
+    def compute_4d_regularization(self, temporal: Tensor) -> Tensor:
+        return regularization_4d(torch.sigmoid(self.splats["opacities"]), temporal)
 
     def rasterize_splats(
         self,
@@ -2123,9 +1518,9 @@ class FreeTime4DRunner:
 
             _update_param_with_optimizer(param_fn, opt_fn, self.splats, self.optimizers)
 
-            # Only reset gradient for relocated Gaussians, not all
-            self.grad_accum[dead_idx] = 0
-            # Don't reset grad_count - keep accumulating
+            # A new population needs a fresh gradient-score window.
+            self.grad_accum.zero_()
+            self.grad_count = 0
 
         return n_dead
 
@@ -2231,12 +1626,14 @@ class FreeTime4DRunner:
 
         max_steps = cfg.max_steps
 
-        # Learning rate schedulers
-        schedulers = [
-            torch.optim.lr_scheduler.ExponentialLR(
-                self.optimizers["means"], gamma=0.01 ** (1.0 / max_steps)
-            )
-        ]
+        # Resume at the same position-LR schedule index even for legacy files.
+        position_lr = cfg.position_lr * self.scene_scale * math.sqrt(cfg.batch_size)
+        for group in self.optimizers["means"].param_groups:
+            group["initial_lr"] = position_lr
+            group["lr"] = position_lr * 0.01 ** (self.start_step / max_steps)
+        schedulers = [torch.optim.lr_scheduler.ExponentialLR(
+            self.optimizers["means"], gamma=0.01 ** (1.0 / max_steps),
+        )]
 
         # Data loader (with skip_none_collate to handle missing frames)
         trainloader = torch.utils.data.DataLoader(
@@ -2261,9 +1658,7 @@ class FreeTime4DRunner:
         if cfg.no_sampling:
             print(f"  [HIGH CAPACITY] No sampling - using ALL points from NPZ")
         if cfg.use_keyframe_sampling:
-            n_keyframes = (cfg.end_frame - cfg.start_frame) // cfg.keyframe_step
-            print(f"  [KEYFRAME MODE] Dense sampling from {n_keyframes} keyframes (every {cfg.keyframe_step} frames)")
-            print(f"    Budget per keyframe: ~{cfg.max_samples // n_keyframes:,} points")
+            print("  [KEYFRAME MODE] Keyframes and durations resolved from initialization")
         if cfg.use_stratified_sampling:
             print(f"  [PURE RELOCATION MODE] Stratified sampling enabled")
         if cfg.use_budget_pruning:
@@ -2359,6 +1754,8 @@ class FreeTime4DRunner:
 
             # 3. LPIPS Loss (perceptual similarity) - paper: λperc=0.01
             lpips_loss = self.lpips(colors_p, pixels_p) if cfg.lambda_perc > 0 else torch.tensor(0.0, device=device)
+            if cfg.lambda_perc > 0:
+                self.lpips.reset()
 
             # 4. 4D Regularization (paper: λreg=1e-2) - after initial settling
             # Lreg(t) = (1/N) * Σ(σ * sg[σ(t)]) - stop-gradient on temporal opacity
@@ -2373,7 +1770,7 @@ class FreeTime4DRunner:
                 if cfg.lambda_duration_reg > 0:
                     durations_exp = torch.exp(self.splats["durations"]).squeeze(-1)
                     # Penalize durations larger than target
-                    target_duration = cfg.init_duration  # 0.1
+                    target_duration = self.effective_init_duration
                     excess = torch.clamp(durations_exp - target_duration, min=0)
                     duration_reg_loss = (excess ** 2).mean()
 
@@ -2402,6 +1799,8 @@ class FreeTime4DRunner:
             for opt in self.optimizers.values():
                 opt.step()
                 opt.zero_grad(set_to_none=True)
+
+            self._project_temporal_params()
 
             for sched in schedulers:
                 sched.step()
@@ -2612,19 +2011,24 @@ class FreeTime4DRunner:
 
                 data = {
                     "step": step,
+                    "use_velocity": cfg.use_velocity,
+                    "n_frames": cfg.end_frame - cfg.start_frame,
                     "splats": self.splats.state_dict(),
                     "optimizers": {k: v.state_dict() for k, v in self.optimizers.items()},
                 }
                 torch.save(data, f"{self.ckpt_dir}/ckpt_{step}.pt")
 
-                # Render trajectory video at save steps
                 if self.world_rank == 0:
-                    self.render_traj(step=step)
-
-                # Export PLY sequence at export_ply_steps (or save_steps if not specified)
-                ply_steps = cfg.export_ply_steps if cfg.export_ply_steps is not None else cfg.save_steps
-                if self.world_rank == 0 and cfg.export_ply and (step + 1) in ply_steps:
-                    self.export_ply_sequence(step=step)
+                    try:
+                        self.render_traj(step=step)
+                    except Exception as error:
+                        print(f"[Export] Trajectory video failed: {error}")
+                    ply_steps = cfg.export_ply_steps if cfg.export_ply_steps is not None else cfg.save_steps
+                    if cfg.export_ply and (step + 1) in ply_steps:
+                        try:
+                            self.export_ply_sequence(step=step)
+                        except Exception as error:
+                            print(f"[Export] PLY export failed: {error}")
 
             # Evaluation
             if step in [s - 1 for s in cfg.eval_steps]:
@@ -2847,31 +2251,33 @@ class FreeTime4DRunner:
 
         # Render frames
         video_path = f"{video_dir}/traj_4d_step{step}.mp4"
-        writer = imageio.get_writer(video_path, fps=cfg.render_traj_fps)
+        writer = MP4Writer(video_path, cfg.render_traj_fps, width, height_img)
 
-        for i in tqdm.trange(len(traj_poses_expanded), desc="Rendering trajectory"):
-            camtoworlds = traj_poses_expanded[i:i+1]  # [1, 4, 4]
-            Ks = K[None]  # [1, 3, 3]
-            t = time_samples[i]
+        try:
+            for i in tqdm.trange(len(traj_poses_expanded), desc="Rendering trajectory"):
+                camtoworlds = traj_poses_expanded[i:i+1]  # [1, 4, 4]
+                Ks = K[None]  # [1, 3, 3]
+                t = time_samples[i]
 
-            # Render at this camera pose and time
-            renders, alphas, info = self.rasterize_splats(
-                camtoworlds=camtoworlds,
-                Ks=Ks,
-                width=width,
-                height=height_img,
-                t=t,
-                sh_degree=cfg.sh_degree,
-            )
+                # Render at this camera pose and time
+                renders, alphas, info = self.rasterize_splats(
+                    camtoworlds=camtoworlds,
+                    Ks=Ks,
+                    width=width,
+                    height=height_img,
+                    t=t,
+                    sh_degree=cfg.sh_degree,
+                )
 
-            colors = torch.clamp(renders[..., :3], 0.0, 1.0)  # [1, H, W, 3]
+                colors = torch.clamp(renders[..., :3], 0.0, 1.0)  # [1, H, W, 3]
 
-            # Convert to uint8 and write
-            frame = colors.squeeze(0).cpu().numpy()  # [H, W, 3]
-            frame = (frame * 255).astype(np.uint8)
-            writer.append_data(frame)
+                # Convert to uint8 and write
+                frame = colors.squeeze(0).cpu().numpy()  # [H, W, 3]
+                frame = (frame * 255).astype(np.uint8)
+                writer.append_data(frame)
 
-        writer.close()
+        finally:
+            writer.close()
         print(f"  Video saved to: {video_path}")
 
     @torch.no_grad()
@@ -2979,6 +2385,7 @@ class FreeTime4DRunner:
             n_frames=n_frames,
             start_frame=start_frame,
             end_frame=end_frame,
+            use_velocity=cfg.use_velocity,
             opacity_threshold=cfg.export_ply_opacity_threshold,
         )
 
@@ -2989,11 +2396,6 @@ class FreeTime4DRunner:
         # ===== Step 2: Export per-frame compact data =====
         print("  Saving per-frame positions and opacities...")
 
-        # Pre-compute tensors on GPU for speed
-        means_gpu = self.splats["means"]
-        velocities_gpu = self.splats["velocities"]
-        times_gpu = self.splats["times"]
-        durations_gpu = self.splats["durations"]
         base_opacity_gpu = torch.sigmoid(self.splats["opacities"])
 
         total_frame_size = 0
@@ -3003,12 +2405,8 @@ class FreeTime4DRunner:
             # Compute normalized time t in [0, 1]
             t = frame / max(n_frames - 1, 1)
 
-            # Compute positions at time t: µx(t) = µx + v·(t-µt)
-            means_t = means_gpu + velocities_gpu * (t - times_gpu)  # [N, 3]
-
-            # Compute temporal opacity: σ(t) = exp(-0.5*((t-µt)/s)^2)
-            temporal_diff = (t - times_gpu) / (durations_gpu + 1e-8)
-            temporal_opacity = torch.exp(-0.5 * temporal_diff ** 2).squeeze(-1)  # [N]
+            means_t = self.compute_positions_at_time(t)
+            temporal_opacity = self.compute_temporal_opacity(t)
 
             # Combined opacity
             opacities_t = base_opacity_gpu * temporal_opacity  # [N]
@@ -3041,7 +2439,7 @@ class FreeTime4DRunner:
 
         # ===== Step 3: Also export first and last frame as full PLY for compatibility =====
         print("  Saving reference PLY files (first and last frame)...")
-        scales_exp = torch.exp(self.splats["scales"])
+        scales_log = self.splats["scales"]
         sh0_tensor = self.splats["sh0"]
         shN_tensor = self.splats["shN"]
 
@@ -3052,13 +2450,16 @@ class FreeTime4DRunner:
             opacities_t = base_opacity_gpu * temporal_opacity
 
             valid_mask = opacities_t > cfg.export_ply_opacity_threshold
+            if not valid_mask.any():
+                print(f"  Skipping reference PLY for empty frame {frame}")
+                continue
 
             filepath = os.path.join(export_dir, f"reference_frame_{frame:06d}.ply")
             export_splats(
                 means=means_t[valid_mask],
-                scales=scales_exp[valid_mask],
+                scales=scales_log[valid_mask],
                 quats=self.splats["quats"][valid_mask],
-                opacities=opacities_t[valid_mask],
+                opacities=torch.logit(opacities_t[valid_mask], eps=1e-6),
                 sh0=sh0_tensor[valid_mask],
                 shN=shN_tensor[valid_mask],
                 format=cfg.export_ply_format,
@@ -3101,11 +2502,13 @@ class FreeTime4DRunner:
         print(f"  Output directory: {ply_dir}")
 
         # Get base Gaussian parameters (constant across time)
-        scales = torch.exp(self.splats["scales"])  # [N, 3]
+        # gsplat's exporter accepts raw log-scales and opacity logits.
+        scales = self.splats["scales"]  # [N, 3]
         quats = self.splats["quats"]  # [N, 4]
         sh0 = self.splats["sh0"]  # [N, 1, 3]
         shN = self.splats["shN"]  # [N, K, 3]
 
+        exported = 0
         for frame in tqdm.trange(0, n_frames, frame_step, desc="Exporting PLY"):
             # Compute normalized time t in [0, 1]
             t = frame / max(n_frames - 1, 1)
@@ -3125,12 +2528,15 @@ class FreeTime4DRunner:
             opacity_threshold = cfg.export_ply_opacity_threshold
             valid_mask = opacities_t > opacity_threshold
             n_visible = valid_mask.sum().item()
+            if n_visible == 0:
+                print(f"  Skipping PLY for empty frame {frame}")
+                continue
 
             # Apply mask to all parameters
             means_visible = means_t[valid_mask]
             scales_visible = scales[valid_mask]
             quats_visible = quats[valid_mask]
-            opacities_visible = opacities_t[valid_mask]
+            opacities_visible = torch.logit(opacities_t[valid_mask], eps=1e-6)
             sh0_visible = sh0[valid_mask]
             shN_visible = shN[valid_mask]
 
@@ -3149,8 +2555,9 @@ class FreeTime4DRunner:
                 format=cfg.export_ply_format,
                 save_to=filepath,
             )
+            exported += 1
 
-        print(f"  Exported {n_export_frames} PLY files to {ply_dir}")
+        print(f"  Exported {exported} PLY files to {ply_dir}")
 
 
 def main(local_rank: int, world_rank: int, world_size: int, cfg: Config):

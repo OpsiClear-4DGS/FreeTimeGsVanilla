@@ -105,26 +105,67 @@ def compute_velocity_knn(
     if len(pos_t) == 0 or len(pos_t1) == 0:
         return np.zeros_like(pos_t), np.zeros(len(pos_t), dtype=bool)
 
+    if k < 1:
+        raise ValueError("k must be positive")
+    k = min(k, len(pos_t1))
+
     # Build KDTree for t+1 frame
     tree = cKDTree(pos_t1, balanced_tree=True, compact_nodes=True)
 
     # Find nearest neighbors
     distances, indices = tree.query(pos_t, k=k, workers=n_workers)
 
-    if k > 1:
-        distances = distances[:, 0]
-        indices = indices[:, 0]
-
-    # Compute velocity (displacement / dt, where dt=1 frame)
     velocities = np.zeros_like(pos_t)
-    valid_mask = distances < max_distance
 
-    if valid_mask.any():
-        matched_positions = pos_t1[indices[valid_mask]]
-        displacement = matched_positions - pos_t[valid_mask]
-        velocities[valid_mask] = displacement  # dt = 1 frame, so velocity = displacement
+    if k > 1:
+        # Average the displacement over the k nearest matches rather than trusting
+        # a single one. A lone nearest neighbour across a multi-frame baseline is
+        # frequently a different piece of surface, so its displacement is largely
+        # triangulation noise; averaging k of them cuts that by ~sqrt(k) while
+        # leaving genuine coherent motion intact. This previously computed k
+        # neighbours and then discarded all but the nearest, making --k-neighbors
+        # a no-op.
+        valid_mask = distances[:, 0] < max_distance
+        if valid_mask.any():
+            disp = pos_t1[indices[valid_mask]] - pos_t[valid_mask][:, None, :]
+            near = distances[valid_mask] < max_distance
+            w = near.astype(np.float32)
+            w /= np.maximum(w.sum(axis=1, keepdims=True), 1.0)
+            velocities[valid_mask] = (disp * w[..., None]).sum(axis=1)
+    else:
+        valid_mask = distances < max_distance
+        if valid_mask.any():
+            matched_positions = pos_t1[indices[valid_mask]]
+            displacement = matched_positions - pos_t[valid_mask]
+            velocities[valid_mask] = displacement  # dt = 1 frame
 
     return velocities, valid_mask
+
+
+def find_next_frame(input_dir: Path, keyframe: int, keyframe_step: int,
+                    frame_end: int) -> tuple:
+    """Pick the frame to measure displacement against, and report the gap.
+
+    The velocity estimate needs a *second* point cloud. Frame ``keyframe + 1`` is
+    the ideal partner - the shorter the baseline, the less chance the nearest
+    neighbour is a different piece of surface - but per-frame triangulation is
+    expensive and is often only run on the keyframes themselves. Falling back to
+    ``keyframe + keyframe_step`` keeps the estimate available at the cost of a
+    longer baseline, which is what the README describes:
+
+        v = (pos[t + step] - pos[t]) / step
+
+    Returns ``(next_frame, gap)`` with ``gap`` in frames, or ``(None, 0)`` when no
+    later point cloud exists at all. Dividing the displacement by ``gap`` keeps
+    the result in metres per frame regardless of which partner was used, which is
+    the unit the trainer's loader expects (it rescales by the frame count).
+    """
+    for candidate in (keyframe + 1, keyframe + keyframe_step, frame_end):
+        if candidate <= keyframe or candidate > min(keyframe + keyframe_step, frame_end):
+            continue
+        if (input_dir / f"points3d_frame{candidate:06d}.npy").exists():
+            return candidate, candidate - keyframe
+    return None, 0
 
 
 def estimate_scene_scale(
@@ -420,14 +461,17 @@ def main():
 
     # Calculate keyframe indices
     keyframes = list(range(args.frame_start, args.frame_end + 1, args.keyframe_step))
+    endpoint = input_dir / f"points3d_frame{args.frame_end:06d}.npy"
+    if args.frame_end not in keyframes and endpoint.exists():
+        keyframes.append(args.frame_end)
     n_keyframes = len(keyframes)
     total_frames = args.frame_end - args.frame_start + 1
 
     # Normalized time step between frames
-    dt_normalized = 1.0 / total_frames  # For velocity scaling later
+    time_denominator = max(total_frames - 1, 1)
 
     # Duration that bridges the keyframe gap (3x the gap for smooth overlap)
-    gap_normalized = args.keyframe_step / total_frames
+    gap_normalized = args.keyframe_step / time_denominator
     default_duration = gap_normalized * 3  # 3x overlap
 
     print("=" * 70)
@@ -466,12 +510,14 @@ def main():
 
     # Process each keyframe
     for i, keyframe in enumerate(tqdm(keyframes, desc="Processing keyframes")):
-        next_frame = keyframe + 1
+        next_frame, frame_gap = find_next_frame(
+            input_dir, keyframe, args.keyframe_step, args.frame_end,
+        )
 
         # Load keyframe data
         positions, colors = load_frame_data(input_dir, keyframe)
 
-        if positions is None:
+        if positions is None or len(positions) == 0:
             print(f"\n  Warning: Missing keyframe {keyframe}")
             continue
 
@@ -487,15 +533,16 @@ def main():
         n_points = len(positions)
 
         # Load next frame for velocity computation
-        pos_next, _ = load_frame_data(input_dir, next_frame)
+        pos_next, _ = load_frame_data(input_dir, next_frame) if next_frame is not None else (None, None)
 
         if pos_next is not None and len(pos_next) > 0:
             # Compute velocity from t → t+1
             velocities, valid_mask = compute_velocity_knn(
                 positions, pos_next,
-                max_distance=args.max_velocity_distance,
+                max_distance=args.max_velocity_distance * frame_gap,
                 k=args.k_neighbors
             )
+            velocities /= frame_gap
             n_valid = valid_mask.sum()
         else:
             # No next frame available (last keyframe or missing data)
@@ -504,7 +551,7 @@ def main():
             n_valid = 0
 
         # Compute normalized time for this keyframe
-        t_normalized = (keyframe - args.frame_start) / total_frames
+        t_normalized = (keyframe - args.frame_start) / time_denominator
         times = np.full((n_points, 1), t_normalized, dtype=np.float32)
         durations = np.full((n_points, 1), default_duration, dtype=np.float32)
 
@@ -518,6 +565,9 @@ def main():
 
         total_points += n_points
         total_valid_velocity += n_valid
+
+    if not all_positions:
+        raise ValueError("No nonempty keyframe point clouds found in the requested range")
 
     # Concatenate
     print("\nConcatenating...")
@@ -615,7 +665,8 @@ def main():
         has_velocity=has_velocity,
         # Metadata
         frame_start=args.frame_start,
-        frame_end=args.frame_end,
+        frame_end=args.frame_end + 1,  # NPZ/trainer metadata uses an exclusive end.
+        time_denominator=time_denominator,
         keyframe_step=args.keyframe_step,
         n_keyframes=n_keyframes,
         max_velocity_distance=args.max_velocity_distance,
@@ -634,7 +685,7 @@ def main():
     print(f"\nNext step: Train with default_keyframe config:")
     print(f"  python src/simple_trainer_freetime_4d_pure_relocation.py default_keyframe \\")
     print(f"      --init-npz-path {output_path} \\")
-    print(f"      --start-frame 0 --end-frame {total_frames}")
+    print(f"      --start-frame {args.frame_start} --end-frame {args.frame_end + 1}")
     print("=" * 70)
 
 

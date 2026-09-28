@@ -175,6 +175,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from datasets.FreeTime_dataset import FreeTimeParser, FreeTimeDataset, skip_none_collate
+from foreground_loss import composite_foreground
 from utils import knn, rgb_to_sh, set_random_seed
 from init_common import read_init_arrays, apply_scene_transform
 from freetime_ops import (
@@ -273,6 +274,9 @@ class Config:
 
     data_factor: int = 1
     """Downsample factor for images. 1 = full resolution, 2 = half, etc."""
+
+    alpha_mode: Literal["ignore", "transparent"] = "ignore"
+    """Transparent mode requires straight RGBA and fits object opacity, including background."""
 
     test_every: int = 8
     """Use every N-th camera for validation (others used for training)."""
@@ -397,6 +401,9 @@ class Config:
 
     lambda_perc: float = 0.01
     """Weight for LPIPS perceptual loss."""
+
+    lambda_alpha: float = 0.1
+    """Full-image alpha L1 weight in transparent mode (Brush's default weight)."""
 
     lambda_4d_reg: float = 1e-3
     """Weight for 4D regularization loss: Lreg = (1/N) * Σ(σ * stop_grad[σ(t)]).
@@ -964,6 +971,9 @@ class FreeTime4DRunner:
             raise ValueError("Vanilla training requires batch_size=1; frames have independent timestamps")
         if cfg.end_frame <= cfg.start_frame or cfg.test_every < 1:
             raise ValueError("A nonempty frame range and positive test_every are required")
+        if (cfg.alpha_mode not in ("ignore", "transparent")
+                or not math.isfinite(cfg.lambda_alpha) or cfg.lambda_alpha < 0):
+            raise ValueError("Invalid alpha mode or alpha loss weight")
         set_random_seed(42 + local_rank)
 
         self.cfg = cfg
@@ -998,8 +1008,8 @@ class FreeTime4DRunner:
         test_set = list(range(0, num_cameras, cfg.test_every))
         print(f"[FreeTime4D] Using {len(test_set)} cameras for validation (every {cfg.test_every}-th of {num_cameras})")
 
-        self.trainset = FreeTimeDataset(self.parser, split="train", test_set=test_set)
-        self.valset = FreeTimeDataset(self.parser, split="val", test_set=test_set)
+        self.trainset = FreeTimeDataset(self.parser, split="train", test_set=test_set, alpha_mode=cfg.alpha_mode)
+        self.valset = FreeTimeDataset(self.parser, split="val", test_set=test_set, alpha_mode=cfg.alpha_mode)
         self.scene_scale = self.parser.scene_scale * 1.1 * cfg.global_scale
         print(f"[FreeTime4D] Scene scale: {self.scene_scale}")
         print(f"[FreeTime4D] Train: {len(self.trainset)}, Val: {len(self.valset)}")
@@ -1724,10 +1734,15 @@ class FreeTime4DRunner:
             )
             colors = renders[..., :3]
 
-            # Random background color (helps with floaters and edge quality)
-            # Applied after rasterization by compositing with alpha
-            if cfg.random_bkgd:
-                bkgd = torch.rand(1, 3, device=device)
+            # The same background must appear behind both prediction and target.
+            # Explicit alpha supervision removes the black-background ambiguity.
+            alpha_loss = colors.new_zeros(())
+            bkgd = torch.rand(1, 3, device=device) if cfg.random_bkgd else colors.new_zeros(1, 3)
+            if cfg.alpha_mode == "transparent":
+                colors, pixels, alpha_loss = composite_foreground(
+                    colors, alphas, pixels, data["alpha"].to(device), bkgd,
+                )
+            elif cfg.random_bkgd:
                 colors = colors + bkgd * (1.0 - alphas)
 
             # Strategy pre-backward (for gradient accumulation)
@@ -1787,7 +1802,7 @@ class FreeTime4DRunner:
             loss_dur_reg = cfg.lambda_duration_reg * duration_reg_loss
 
             # Total loss
-            loss = loss_img + loss_ssim + loss_lpips + loss_4d_reg + loss_dur_reg
+            loss = loss_img + loss_ssim + loss_lpips + loss_4d_reg + loss_dur_reg + cfg.lambda_alpha * alpha_loss
 
             # Backward
             loss.backward()
@@ -1890,6 +1905,9 @@ class FreeTime4DRunner:
                 self.writer.add_scalar("loss/ssim_raw", ssim_loss.item(), step)
                 self.writer.add_scalar("loss/lpips_raw", lpips_loss.item(), step)
                 self.writer.add_scalar("loss/4d_reg_raw", reg_4d_loss.item(), step)
+                if cfg.alpha_mode == "transparent":
+                    self.writer.add_scalar("loss/alpha_raw", alpha_loss.item(), step)
+                    self.writer.add_scalar("loss_weighted/alpha", (cfg.lambda_alpha * alpha_loss).item(), step)
 
                 # --- Weighted Loss Components (what goes into total) ---
                 self.writer.add_scalar("loss_weighted/l1", loss_img.item(), step)
@@ -2076,13 +2094,18 @@ class FreeTime4DRunner:
 
             torch.cuda.synchronize()
             tic = time.time()
-            renders, _, _ = self.rasterize_splats(
+            renders, alphas, _ = self.rasterize_splats(
                 camtoworlds, Ks, width, height, t, cfg.sh_degree,
             )
             torch.cuda.synchronize()
             ellipse_time += time.time() - tic
 
             colors = torch.clamp(renders[..., :3], 0, 1)
+            if cfg.alpha_mode == "transparent":
+                colors, pixels, alpha_loss = composite_foreground(
+                    colors, alphas, pixels, data["alpha"].to(device), colors.new_zeros(1, 3),
+                )
+                metrics["alpha_l1"].append(alpha_loss)
 
             # Save image
             if self.world_rank == 0:

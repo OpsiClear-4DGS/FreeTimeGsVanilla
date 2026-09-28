@@ -21,6 +21,21 @@ budgets, Adam resume settings, duration gradients, LPIPS input normalization, re
 statistics, and matching training/viewer/export math. MP4 output handles odd
 image dimensions and export failures do not interrupt a saved training run.
 
+For isolated objects, use `--alpha-mode transparent --random-bkgd` with 8-bit
+**straight RGBA** frames. Alpha is a soft foreground target, including zero
+opacity outside the object. The trainer composites both target and rendered
+RGB on the same random background and adds full-image alpha L1
+(`--lambda-alpha 0.1` by default). Do not premultiply the saved RGB or infer
+alpha from black pixels: black objects still need opaque alpha. Missing alpha
+or frames fail explicitly in this mode. Resizing, undistortion and cropping
+transform RGB and alpha together. Evaluation composites the target on black
+and reports alpha L1 alongside RGB metrics. The default `--alpha-mode ignore`
+preserves RGB-only training for existing scene datasets.
+
+This independently implemented PyTorch loss follows the transparent-alpha
+approach in [Brush](https://github.com/ArthurBrussee/brush/tree/6378a76add3b93501abb55c2dc08d71688537679),
+with uniform random background colors in [0, 1]. No Brush code is bundled.
+
 ## Installation
 
 Use Python 3.12+, a CUDA-capable PyTorch environment, and a CUDA toolkit for the

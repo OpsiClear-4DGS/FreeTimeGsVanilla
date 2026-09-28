@@ -546,6 +546,7 @@ class FreeTimeDataset:
         load_depths: bool = False,
         test_set: List[int] = None,
         remove_set: List[int] = None,
+        alpha_mode: Literal["ignore", "transparent"] = "ignore",
     ):
         """
         Args:
@@ -555,11 +556,15 @@ class FreeTimeDataset:
             load_depths: Whether to load depth data
             test_set: List of camera indices for testing
             remove_set: List of camera indices to exclude
+            alpha_mode: "transparent" requires straight RGBA and supervises opacity.
         """
         self.parser = parser
         self.split = split
         self.patch_size = patch_size
         self.load_depths = load_depths
+        if alpha_mode not in ("ignore", "transparent"):
+            raise ValueError(f"Unsupported alpha mode: {alpha_mode}")
+        self.alpha_mode = alpha_mode
         self.total_frames = parser.total_frames
         self.start_frame = parser.start_frame
 
@@ -608,9 +613,18 @@ class FreeTimeDataset:
 
         # Skip missing frames gracefully
         if not os.path.exists(image_path):
+            if self.alpha_mode == "transparent":
+                raise FileNotFoundError(f"Missing RGBA training frame: {image_path}")
             return None
 
-        image = imageio.imread(image_path)[..., :3]
+        image = imageio.imread(image_path)
+        if self.alpha_mode == "transparent":
+            if image.ndim != 3 or image.shape[-1] != 4 or image.dtype != np.uint8:
+                raise ValueError(f"Transparent training requires 8-bit straight RGBA: {image_path}")
+        else:
+            image = image[..., :3]
+        # Transform RGB and soft alpha together to keep their pixel coordinates
+        # identical through resizing, camera undistortion and random cropping.
         image = cv2.resize(
             image,
             dsize=(image.shape[1] // self.parser.factor,
@@ -648,7 +662,7 @@ class FreeTimeDataset:
         data = {
             "K": torch.from_numpy(K).float(),
             "camtoworld": torch.from_numpy(camtoworlds).float(),
-            "image": torch.from_numpy(image).float(),
+            "image": torch.from_numpy(np.ascontiguousarray(image[..., :3])).float(),
             "image_id": item,
             "time": time,  # Normalized [0, 1] over full sequence
             "frame_idx": frame_idx,  # Actual frame number
@@ -659,6 +673,9 @@ class FreeTimeDataset:
 
         if mask is not None:
             data["mask"] = torch.from_numpy(mask).bool()
+
+        if self.alpha_mode == "transparent":
+            data["alpha"] = torch.from_numpy(np.ascontiguousarray(image[..., 3:4])).float() / 255.0
 
         return data
 

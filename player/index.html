@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>FreeTimeGS · Player</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <symbol id="play" viewBox="0 0 24 24">
+          <path d="m8 5 11 7-11 7Z" />
+        </symbol>
+        <symbol id="pause" viewBox="0 0 24 24">
+          <path d="M8 5v14M16 5v14" />
+        </symbol>
+        <symbol id="start" viewBox="0 0 24 24">
+          <path d="M5 5v14m14-14L8 12l11 7Z" />
+        </symbol>
+        <symbol id="loop" viewBox="0 0 24 24">
+          <path
+            d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4m14-1v2a3 3 0 0 1-3 3H3"
+          />
+        </symbol>
+        <symbol id="expand" viewBox="0 0 24 24">
+          <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
+        </symbol>
+        <symbol id="fit" viewBox="0 0 24 24">
+          <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
+          <circle cx="12" cy="12" r="4" />
+        </symbol>
+        <symbol id="open" viewBox="0 0 24 24">
+          <path d="M3 8V5h7l2 3h9l-3 12H3V8Z" />
+        </symbol>
+        <symbol id="link" viewBox="0 0 24 24">
+          <path
+            d="m10 14 4-4m-6 2-2 2a4 4 0 0 0 6 6l2-2m-2-10 2-2a4 4 0 0 1 6 6l-2 2"
+          />
+        </symbol>
+        <symbol id="settings" viewBox="0 0 24 24">
+          <path d="M4 7h16M4 17h16M9 4v6m6 4v6" />
+        </symbol>
+      </defs>
+    </svg>
+    <main class="shell">
+      <header class="header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">f<span>t</span></span>
+          <div>
+            <h1>FreeTimeGS <span>Player</span></h1>
+            <p>A little freedom in every frame.</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="demo" class="quiet">Try demo</button>
+          <button id="url-open" class="secondary">
+            <svg><use href="#link" /></svg><span>Load URL</span>
+          </button>
+          <button id="open-file" class="primary">
+            <svg><use href="#open" /></svg><span>Open file</span>
+          </button>
+          <input
+            id="file"
+            type="file"
+            accept=".ply"
+            hidden
+            aria-label="Open FTGS file"
+          />
+        </div>
+      </header>
+      <div class="workspace">
+        <section id="viewer" class="viewer" aria-label="3D Gaussian player">
+          <canvas
+            id="canvas"
+            tabindex="0"
+            aria-label="Interactive 3D scene. Drag to orbit, Shift-drag to pan, scroll to zoom."
+          ></canvas>
+          <div class="scene-bar">
+            <div>
+              <span class="eyebrow">SCENE</span>
+              <h2 id="scene-name">Opening the demo…</h2>
+            </div>
+            <div class="scene-tools">
+              <span id="render-fps">— fps</span
+              ><button
+                id="details-toggle"
+                class="icon"
+                title="Scene settings"
+                aria-label="Scene settings"
+                aria-expanded="true"
+              >
+                <svg><use href="#settings" /></svg>
+              </button>
+            </div>
+          </div>
+          <div id="message" class="message" role="status" data-state="loading">
+            <span class="dot"></span
+            ><span id="message-text">Preparing player</span>
+          </div>
+          <div id="drop-hint" class="drop-hint" hidden>
+            Drop your <strong>.ftgs.ply</strong> to open it
+          </div>
+          <div class="viewer-bottom">
+            <div class="hints">
+              <span
+                >Drag to orbit <i>·</i> Shift-drag to pan <i>·</i> Scroll to
+                zoom</span
+              ><span id="demo-label">SYNTHETIC DEMO</span>
+            </div>
+            <div class="transport">
+              <label class="sr-only" for="timeline">Timeline</label
+              ><input
+                id="timeline"
+                type="range"
+                min="0"
+                max="1"
+                step="0.0001"
+                value="0"
+                disabled
+              />
+              <div class="transport-row">
+                <div class="transport-left">
+                  <button
+                    id="restart"
+                    class="icon"
+                    title="Restart"
+                    aria-label="Restart"
+                    disabled
+                  >
+                    <svg><use href="#start" /></svg>
+                  </button>
+                  <button
+                    id="play-toggle"
+                    class="icon play-button"
+                    title="Play / pause (Space)"
+                    aria-label="Play"
+                    disabled
+                  >
+                    <svg><use id="play-icon" href="#play" /></svg>
+                  </button>
+                  <output id="timecode"
+                    >00:00.00 <span>/ 00:00.00</span></output
+                  >
+                </div>
+                <div class="transport-right">
+                  <label class="sr-only" for="speed">Playback speed</label
+                  ><select id="speed" aria-label="Playback speed">
+                    <option value="0.25">0.25×</option>
+                    <option value="0.5">0.5×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="2">2×</option>
+                  </select>
+                  <button
+                    id="loop-toggle"
+                    class="icon active"
+                    title="Loop playback"
+                    aria-label="Loop playback"
+                    aria-pressed="true"
+                  >
+                    <svg><use href="#loop" /></svg>
+                  </button>
+                  <button
+                    id="fit-camera"
+                    class="icon"
+                    title="Fit scene (R)"
+                    aria-label="Fit scene"
+                  >
+                    <svg><use href="#fit" /></svg>
+                  </button>
+                  <button
+                    id="fullscreen"
+                    class="icon"
+                    title="Fullscreen (F)"
+                    aria-label="Fullscreen"
+                  >
+                    <svg><use href="#expand" /></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <aside id="details" class="details">
+          <div class="panel-heading">
+            <h2>Scene details</h2>
+            <span class="tag">FTGS v1</span>
+          </div>
+          <dl class="stats">
+            <div>
+              <dt>Gaussians loaded</dt>
+              <dd id="point-count">—</dd>
+            </div>
+            <div>
+              <dt>Visible now</dt>
+              <dd id="visible-count">—</dd>
+            </div>
+            <div>
+              <dt>File size</dt>
+              <dd id="file-size">—</dd>
+            </div>
+            <div>
+              <dt>Motion</dt>
+              <dd id="motion">—</dd>
+            </div>
+          </dl>
+          <p id="preview-note" class="note"></p>
+          <h3>Playback</h3>
+          <label class="setting"
+            >Frames
+            <input id="frames" type="number" min="1" max="1000000" value="181"
+          /></label>
+          <label class="setting"
+            >Frame rate
+            <select id="fps">
+              <option>24</option>
+              <option selected>30</option>
+              <option>60</option>
+            </select></label
+          >
+          <p id="frame-note" class="note">
+            Playback frame rate is a player setting.
+          </p>
+          <h3>View</h3>
+          <label class="setting"
+            >Point limit
+            <select id="point-limit">
+              <option value="250000">250 thousand</option>
+              <option value="1000000" selected>1 million</option>
+              <option value="2000000">2 million</option>
+              <option value="Infinity">All points</option>
+            </select></label
+          >
+          <label class="setting"
+            >SH degree
+            <select id="sh-degree">
+              <option>0</option>
+            </select></label
+          >
+          <label class="setting"
+            >Resolution
+            <select id="resolution">
+              <option value="0.5">Half</option>
+              <option value="1" selected>Full</option>
+            </select></label
+          >
+          <label class="setting"
+            >Up axis
+            <select id="up-axis">
+              <option value="y">Y up</option>
+              <option value="z">Z up</option>
+            </select></label
+          >
+          <div class="local-note">
+            <span class="local-dot"></span>
+            <div>
+              <strong>Your file stays here.</strong>
+              <p>Local files are read in your browser. Nothing is uploaded.</p>
+            </div>
+          </div>
+        </aside>
+      </div>
+      <footer>
+        <span
+          >FreeTimeGS Vanilla <span class="footer-divider">/</span> 4D Gaussian
+          playback</span
+        ><span><kbd>Space</kbd> play / pause <kbd>← →</kbd> step</span>
+      </footer>
+    </main>
+    <dialog id="url-dialog">
+      <form id="url-form">
+        <div class="dialog-heading">
+          <h2>Open a model URL</h2>
+          <button
+            type="button"
+            id="url-close"
+            class="quiet"
+            aria-label="Close URL dialog"
+          >
+            ✕
+          </button>
+        </div>
+        <label for="model-url">FTGS PLY URL</label
+        ><input
+          id="model-url"
+          type="url"
+          placeholder="https://example.com/scene.ftgs.ply"
+          required
+        />
+        <p class="note">The host must allow cross-origin requests (CORS).</p>
+        <button type="submit" class="primary">Load model</button>
+      </form>
+    </dialog>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

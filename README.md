@@ -326,9 +326,8 @@ alpha = max(sigmoid(opacity) * exp(-0.5 * (dt / exp(log_duration))**2), 0.0001)
 
 The sequence spans `t=0..1`; Gaussian canonical times may lie outside that
 interval. Relative frame `i` maps to `i / max(n_frames - 1, 1)`. This file stores
-rendering parameters, not optimizer state. Animated playback requires a reader
-that implements these temporal fields; the bundled viewer still loads `.pt`
-checkpoints.
+rendering parameters, not optimizer state. The browser player below reads this
+layout directly; the Python/CUDA viewer loads `.pt` checkpoints.
 
 ### Existing training outputs
 
@@ -348,7 +347,24 @@ results/
 └── tb/                            # TensorBoard logs
 ```
 
-## 4D Viewer
+## Browser player for FTGS files
+
+The standalone [FTGS Player](player/README.md) opens `.ftgs.ply` files locally or
+from a URL and runs entirely in the browser with WebGL2. It includes playback,
+seeking, speed and loop controls, orbit/pan/zoom, and a synthetic demo. It runs as a static site
+without a build step or package installation.
+
+```bash
+python -m http.server 8765 --bind 127.0.0.1 --directory player
+```
+
+Open <http://localhost:8765> and choose **Open file** or drop in an exported
+`.ftgs.ply`. Local files stay in the browser. The default preview loads up to
+1 million Gaussians; choose **All points** for full detail when GPU memory allows.
+See the [player documentation](player/README.md) for format support, controls,
+rendering limits, and tests.
+
+## Python/CUDA 4D Viewer
 
 An interactive viewer for visualizing trained 4D Gaussian Splatting models with temporal animation.
 

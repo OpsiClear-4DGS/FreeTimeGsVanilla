@@ -11,7 +11,7 @@ export function mountPlayerShell(viewer) {
         <symbol id="collapse" viewBox="0 0 24 24"><path d="M4.5 8.5h4v-4m7 0v4h4m-15 7h4v4m7 0v-4h4" /></symbol>
       </defs>
     </svg>
-    <canvas id="canvas" tabindex="0" aria-label="3D scene. Drag to orbit, Shift-drag to pan, scroll to zoom."></canvas>
+    <canvas id="canvas" tabindex="0" aria-label="3D scene. Drag to orbit, Shift-drag to pan, scroll to zoom. WASD to move, Q/E down/up, Shift to move faster."></canvas>
     <button id="empty" class="empty" aria-label="Choose a .ftgs.ply file">
       <span class="empty-icon"><svg aria-hidden="true"><use href="#play" /></svg></span>
       <span class="empty-title">Drop a .ftgs.ply to play</span>

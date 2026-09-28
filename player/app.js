@@ -1,7 +1,7 @@
-import { FTGSPlayer } from "./player.js";
+import { FTGSPlayer } from "./player.js?v=3";
 import { attachPlayerBridge } from "./bridge.js";
 import { demoFile } from "./demo.js";
-import { mountPlayerShell } from "./shell.js";
+import { mountPlayerShell } from "./shell.js?v=3";
 
 mountPlayerShell(document.getElementById("viewer"));
 const $ = (id) => document.getElementById(id);
@@ -152,7 +152,7 @@ try {
       document.title = `${detail.name} · FTGS Player`;
       $("canvas").setAttribute(
         "aria-label",
-        `${detail.name}. Drag to orbit, Shift-drag to pan, scroll to zoom.`,
+        `${detail.name}. Drag to orbit, Shift-drag to pan, scroll to zoom. WASD to move, Q/E down/up, Shift to move faster.`,
       );
       $("viewer").dataset.loaded = "true";
       $("controls").hidden = !showControls;

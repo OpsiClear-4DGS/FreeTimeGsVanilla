@@ -94,9 +94,16 @@ def main():
               const {demoFile} = await import('/ftgs-player/demo.js');
               Object.assign(window, {FTGSPlayer, FTGSEmbed, demo: demoFile()});
               window.live = {workers: new Set(), frames: new Set(), observers: new Set()};
+              window.sortDelay = 0;
               const WorkerBase = Worker, ObserverBase = ResizeObserver;
               window.Worker = class extends WorkerBase {
                 constructor(...args) { super(...args); live.workers.add(this); }
+                set onmessage(callback) {
+                  super.onmessage = event => {
+                    if (sortDelay) setTimeout(() => callback(event), sortDelay);
+                    else callback(event);
+                  };
+                }
                 terminate() { live.workers.delete(this); super.terminate(); }
               };
               window.ResizeObserver = class extends ObserverBase {
@@ -138,6 +145,61 @@ def main():
             page.evaluate("check(a.time === .4 && !a.playing, 'Host keyboard affected player')")
             assert page.title() == "Host project"
             assert page.locator("footer").is_visible()
+            # Navigation must draw while keys are held, even if sorting takes several frames.
+            page.evaluate('''() => {
+              window.eye = id => {
+                const gl = document.querySelector(id).getContext('webgl2');
+                const program = gl.getParameter(gl.CURRENT_PROGRAM);
+                return program ? Array.from(gl.getUniform(program, gl.getUniformLocation(program, 'eye'))) : null;
+              };
+              sortDelay = 60;
+              a.setView({eye:[0,0,8], target:[0,0,0]});
+            }''')
+            page.wait_for_function("eye('#a') && Math.abs(eye('#a')[2] - 8) < .001 && eye('#b')")
+            other_eye = page.evaluate("eye('#b')")
+            page.locator("#a").focus()
+            page.keyboard.down("w")
+            page.wait_for_function("eye('#a')[2] < 7.8", timeout=5000)
+            assert page.evaluate("eye('#b')") == other_eye, "WASD moved an unfocused player"
+            assert page.evaluate("a.time") == .4, "Camera movement changed playback time"
+            page.keyboard.up("w")
+            page.wait_for_timeout(200)
+            stopped_eye = page.evaluate("eye('#a')")
+            page.wait_for_timeout(200)
+            assert page.evaluate("eye('#a')") == stopped_eye, "Movement continued after key release"
+            page.keyboard.down("d")
+            page.wait_for_function("eye('#a')[0] > .1", timeout=5000)
+            page.locator("#host-input").focus()  # Blur while D is still down.
+            page.wait_for_timeout(200)
+            stopped_eye = page.evaluate("eye('#a')")
+            page.wait_for_timeout(200)
+            assert page.evaluate("eye('#a')") == stopped_eye, "Movement continued after blur"
+            page.keyboard.up("d")
+            page.locator("#host-input").fill("wasdqe")
+            assert page.locator("#host-input").input_value() == "wasdqe"
+            page.locator("#b").focus()
+            page.keyboard.down("e")
+            page.wait_for_function("before => eye('#b')[1] > before[1] + .1", arg=other_eye, timeout=5000)
+            page.keyboard.up("e")
+            assert page.evaluate("eye('#a')") == stopped_eye, "Navigation crossed canvas instances"
+            page.locator("#a").focus()
+            page.evaluate('''() => {
+              const event = new KeyboardEvent('keydown', {code:'KeyW', key:'w', ctrlKey:true, bubbles:true, cancelable:true});
+              document.querySelector('#a').dispatchEvent(event);
+              check(!event.defaultPrevented, 'Browser shortcut was captured');
+            }''')
+            page.wait_for_timeout(200)
+            assert page.evaluate("eye('#a')") == stopped_eye
+            page.keyboard.down("w")
+            page.wait_for_function("before => eye('#a')[2] < before[2] - .1", arg=stopped_eye, timeout=5000)
+            page.evaluate("dispatchEvent(new Event('blur'))")
+            page.wait_for_timeout(200)
+            stopped_eye = page.evaluate("eye('#a')")
+            page.wait_for_timeout(200)
+            assert page.evaluate("eye('#a')") == stopped_eye, "Movement continued after window blur"
+            page.keyboard.up("w")
+            page.evaluate("sortDelay = 0")
+            print("PASS: focused WASD/QE navigation, continuous drawing with slow sorting, independent canvases, release/blur safety", flush=True)
             page.evaluate('''async () => {
               window.ended = new Promise(resolve => b.addEventListener('ended', resolve, {once:true}));
               b.play(); await ended;
@@ -210,6 +272,20 @@ def main():
             assert frame.locator("#controls").is_hidden()
             assert frame.locator("#canvas").bounding_box()["width"] == 640
             assert page.title() == "Host project"
+            frame.wait_for_function("document.querySelector('#canvas').getContext('webgl2').getParameter(0x8B8D) !== null")
+            frame.evaluate('''() => {
+              window.renderedEye = () => {
+                const gl = document.querySelector('#canvas').getContext('webgl2');
+                const program = gl.getParameter(gl.CURRENT_PROGRAM);
+                return Array.from(gl.getUniform(program, gl.getUniformLocation(program, 'eye')));
+              };
+              window.beforeMove = renderedEye();
+            }''')
+            frame.locator("#canvas").focus()
+            page.keyboard.down("w")
+            frame.wait_for_function("Math.hypot(...renderedEye().map((v,i) => v-beforeMove[i])) > .05", timeout=5000)
+            page.keyboard.up("w")
+            assert not page.evaluate("embed.state.playing"), "Iframe movement resumed playback"
             page.locator("#embedded").evaluate("el => { el.style.width='320px'; el.style.height='220px'; }")
             frame.wait_for_function("document.querySelector('#canvas').clientWidth === 320")
             page.evaluate('''async () => {

@@ -1,5 +1,5 @@
 import { readFTGS } from "./ftgs.js";
-import { OrbitCamera, validateCameraView } from "./camera.js";
+import { OrbitCamera, validateCameraView } from "./camera.js?v=3";
 import { SplatRenderer } from "./renderer.js";
 
 export const PLAYER_EVENTS = Object.freeze([
@@ -85,7 +85,8 @@ export class FTGSPlayer extends EventTarget {
       this.#renderer = new SplatRenderer(canvas);
       this.#camera = new OrbitCamera(canvas, () => {
         this.#dirty = true;
-        this.#revision++;
+        // Draw each completed sort with its own camera snapshot while moving.
+        // Invalidating every camera step would starve drawing on slower workers.
       });
       this.#camera.upAxis = up;
       this.#resize = new ResizeObserver(() => {
@@ -184,6 +185,7 @@ export class FTGSPlayer extends EventTarget {
     signal?.throwIfAborted();
     const generation = ++this.#generation;
     this.#loadController?.abort();
+    this.#camera.stopMoving();
     const controller = (this.#loadController = new AbortController());
     const cancel = () => controller.abort();
     signal?.addEventListener("abort", cancel, { once: true });
@@ -393,6 +395,7 @@ export class FTGSPlayer extends EventTarget {
     const elapsed = Math.min((now - this.#previousTick) / 1000, 0.25);
     this.#previousTick = now;
     if (this.#model && this.#status !== "loading" && !this.#contextLost) {
+      this.#camera.update(elapsed);
       if (this.#playing) {
         const next = this.#time + elapsed / this.duration;
         this.#time = this.#options.loop ? next % 1 : Math.min(1, next);

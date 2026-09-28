@@ -8,6 +8,7 @@ const unit = (v) => {
   const n = Math.hypot(...v);
   return v.map((x) => x / n);
 };
+const movementKeys = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE"]);
 
 export function lookAt(eye, target, up) {
   const back = unit(eye.map((v, i) => v - target[i]));
@@ -56,11 +57,58 @@ export class OrbitCamera {
   constructor(canvas, onChange) {
     this.canvas = canvas;
     this.onChange = onChange;
+    this.keys = new Set();
+    this.fast = false;
+    this.addedTabIndex = !canvas.hasAttribute("tabindex");
+    if (this.addedTabIndex) canvas.tabIndex = 0;
     this.upAxis = "y";
     this.bounds = { center: [0, 0, 0], radius: 1 };
     this.fit();
     this.events = new AbortController();
     const options = { signal: this.events.signal };
+    canvas.addEventListener(
+      "keydown",
+      (event) => {
+        if (
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey ||
+          event.isComposing
+        ) {
+          this.stopMoving();
+          return;
+        }
+        if (event.defaultPrevented) return;
+        this.fast = event.shiftKey;
+        if (!movementKeys.has(event.code)) return;
+        event.preventDefault();
+        // After a blur/reset, require a fresh press rather than an old key repeat.
+        if (!event.repeat || this.keys.has(event.code))
+          this.keys.add(event.code);
+      },
+      options,
+    );
+    canvas.addEventListener(
+      "keyup",
+      (event) => {
+        this.keys.delete(event.code);
+        this.fast = event.shiftKey;
+      },
+      options,
+    );
+    canvas.addEventListener("blur", () => this.stopMoving(), options);
+    canvas.ownerDocument.defaultView.addEventListener(
+      "blur",
+      () => this.stopMoving(),
+      options,
+    );
+    canvas.ownerDocument.addEventListener(
+      "visibilitychange",
+      () => {
+        if (canvas.ownerDocument.hidden) this.stopMoving();
+      },
+      options,
+    );
     const pointers = new Map();
     canvas.addEventListener("contextmenu", (e) => e.preventDefault(), options);
     canvas.addEventListener(
@@ -115,6 +163,7 @@ export class OrbitCamera {
     );
   }
   fit(bounds = this.bounds) {
+    this.stopMoving();
     this.bounds = bounds;
     this.target = [...bounds.center];
     const aspect = Math.max(
@@ -130,6 +179,7 @@ export class OrbitCamera {
   }
   restore(view) {
     const { eye, target, up, fov } = validateCameraView(view);
+    this.stopMoving();
     const offset = eye.map((v, i) => v - target[i]);
     const distance = Math.hypot(...offset);
     this.target = [...target];
@@ -157,6 +207,46 @@ export class OrbitCamera {
     for (let i = 0; i < 3; i++)
       this.target[i] += (-dx * view[4 * i] + dy * view[4 * i + 1]) * scale;
   }
+  stopMoving() {
+    this.keys?.clear();
+    this.fast = false;
+  }
+  update(seconds) {
+    if (!this.keys.size) return;
+    if (!this.canvas.matches(":focus") || this.canvas.ownerDocument.hidden) {
+      this.stopMoving();
+      return;
+    }
+    const held = (code) => Number(this.keys.has(code));
+    this.move(
+      held("KeyW") - held("KeyS"),
+      held("KeyD") - held("KeyA"),
+      held("KeyE") - held("KeyQ"),
+      seconds,
+      this.fast,
+    );
+  }
+  move(forward, right, up, seconds, fast = false) {
+    if (!(seconds > 0) || !Number.isFinite(seconds)) return;
+    const { view } = this.snapshot();
+    const direction = [0, 1, 2].map(
+      (axis) =>
+        right * view[4 * axis] -
+        forward * view[4 * axis + 2] +
+        (axis === (this.upAxis === "z" ? 2 : 1) ? up : 0),
+    );
+    const length = Math.hypot(...direction);
+    if (length < 1e-8) return;
+    const speed = Math.max(
+      this.bounds.radius * 0.01,
+      Math.min(this.bounds.radius, this.distance),
+    );
+    const step = (speed * (fast ? 4 : 1) * Math.min(seconds, 0.1)) / length;
+    // Translate the eye and its orbit target together, preserving the view angle.
+    for (let axis = 0; axis < 3; axis++)
+      this.target[axis] += direction[axis] * step;
+    this.onChange?.();
+  }
   snapshot() {
     const horizontal = Math.cos(this.pitch) * this.distance;
     const offset = [
@@ -178,6 +268,9 @@ export class OrbitCamera {
     };
   }
   destroy() {
+    this.stopMoving();
     this.events.abort();
+    if (this.addedTabIndex && this.canvas.getAttribute("tabindex") === "0")
+      this.canvas.removeAttribute("tabindex");
   }
 }

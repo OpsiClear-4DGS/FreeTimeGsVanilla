@@ -352,7 +352,8 @@ results/
 The standalone [FTGS Player](player/README.md) opens `.ftgs.ply` files locally or
 from a URL and runs entirely in the browser with WebGL2. Drop a file to play it
 in a full-window canvas with a full-width timeline and controls that fade when idle. It supports
-seeking, automatic looping and orbit/pan/zoom. It runs as a static site
+seeking, automatic looping, orbit/pan/zoom, and WASD movement (Q/E down/up,
+Shift for faster movement). It runs as a static site
 without a build step or package installation.
 
 ```bash

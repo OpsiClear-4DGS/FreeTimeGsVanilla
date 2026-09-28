@@ -43,8 +43,14 @@ keyboard shortcuts, or style your page. Multiple canvases work independently.
 ```
 
 Give the canvas a CSS width and height. Rendering follows element resizing.
-Drag, pan, and zoom stay local to that canvas; build any buttons or shortcuts in
-your host application. Keep `touch-action:none` for touch navigation.
+Drag, pan, zoom, and keyboard movement stay local to that canvas; build playback
+buttons or shortcuts in your host application. After clicking or tabbing into
+the canvas, hold W/S to move forward/back, A/D to strafe, Q/E to move down/up, and
+Shift to move four times faster. Speed follows scene scale and zoom; Q/E respects
+the configured up axis. Movement also works while paused and stops on blur or
+when the page is hidden. Physical key positions are used. The player makes the
+canvas focusable if needed and restores its original `tabindex` on destruction.
+Keep `touch-action:none` for touch navigation.
 
 Constructor options:
 

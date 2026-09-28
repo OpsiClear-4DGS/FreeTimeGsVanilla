@@ -27,5 +27,5 @@ if (new URLSearchParams(location.search).get("mode") === "iframe") {
   });
 } else {
   // app.js binds this shell's controls to an independent FTGSPlayer canvas.
-  await import("../app.js?v=2");
+  await import("../app.js?v=3");
 }

@@ -70,6 +70,10 @@ the FTGS file itself does not store capture cameras or frame rate.
 | Orbit | Left drag / one-finger drag |
 | Pan | Right drag, Shift + drag, or two-finger drag |
 | Zoom | Scroll / pinch |
+| Move forward / backward | W / S |
+| Strafe left / right | A / D |
+| Move down / up | Q / E |
+| Move faster | Hold Shift (4× speed) |
 | Fit camera / restore saved view | Reset view button or R |
 | Switch Y up / Z up | U |
 | Fullscreen | Fullscreen button or F |
@@ -77,6 +81,12 @@ the FTGS file itself does not store capture cameras or frame rate.
 Shortcuts apply when the canvas or page has focus, leaving form controls' keys
 available normally. The controls remain visible while paused or focused with the
 keyboard.
+
+Click or Tab into the scene to use movement keys. Movement follows your viewing
+direction, with speed scaled to the scene and zoom level; Q/E follows the Y or Z
+up axis. The keys work during playback and while paused. Releasing a key, focusing
+another control, or leaving the tab stops movement. Browser shortcuts and text
+fields keep their usual behavior. Movement uses the physical WASD/QE key positions.
 
 ## Format and rendering
 

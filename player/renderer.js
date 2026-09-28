@@ -271,6 +271,10 @@ export class SplatRenderer {
   }
   destroy() {
     const gl = this.gl;
+    // A current program remains alive after deleteProgram until it is unbound.
+    gl.useProgram(null);
+    gl.bindVertexArray(null);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
     this.textures.forEach((t) => gl.deleteTexture(t));
     gl.deleteBuffer(this.order);
     gl.deleteBuffer(this.corners);

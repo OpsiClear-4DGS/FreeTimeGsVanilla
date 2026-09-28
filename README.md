@@ -365,6 +365,10 @@ Open <http://localhost:8765> and click to open a file or drop in an exported
 See the [player documentation](player/README.md) for format support, controls,
 rendering limits, and tests.
 
+The [embedding API](player/API.md) supports independent canvas instances and
+iframe controls, with `load`, `play`, `pause`, `seek`, events, and `destroy`.
+It includes runnable examples and a React lifecycle example.
+
 ## Python/CUDA 4D Viewer
 
 An interactive viewer for visualizing trained 4D Gaussian Splatting models with temporal animation.

@@ -33,6 +33,25 @@ export function lookAt(eye, target, up) {
   ]);
 }
 
+export function validateCameraView({ eye, target, up = "y", fov = 45 }) {
+  if (
+    ![eye, target].every(
+      (v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite),
+    ) ||
+    !["y", "z"].includes(up) ||
+    !Number.isFinite(fov) ||
+    fov < 10 ||
+    fov > 120
+  )
+    throw new Error(
+      "Invalid camera view: use finite eye/target vectors, y/z up and a 10–120 degree fov.",
+    );
+  const distance = Math.hypot(...eye.map((v, i) => v - target[i]));
+  if (!(distance > 1e-6 && Number.isFinite(distance)))
+    throw new Error("Camera eye and target must be distinct finite positions.");
+  return { eye: [...eye], target: [...target], up, fov };
+}
+
 export class OrbitCamera {
   constructor(canvas, onChange) {
     this.canvas = canvas;
@@ -109,25 +128,10 @@ export class OrbitCamera {
     this.fov = Math.PI / 4;
     this.onChange?.();
   }
-  restore({ eye, target, up = "y", fov = 45 }) {
-    if (
-      ![eye, target].every(
-        (v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite),
-      ) ||
-      !["y", "z"].includes(up) ||
-      !Number.isFinite(fov) ||
-      fov < 10 ||
-      fov > 120
-    )
-      throw new Error(
-        "Invalid camera view: use finite eye/target vectors, y/z up and a 10–120 degree fov.",
-      );
+  restore(view) {
+    const { eye, target, up, fov } = validateCameraView(view);
     const offset = eye.map((v, i) => v - target[i]);
     const distance = Math.hypot(...offset);
-    if (!(distance > 1e-6 && Number.isFinite(distance)))
-      throw new Error(
-        "Camera eye and target must be distinct finite positions.",
-      );
     this.target = [...target];
     this.distance = distance;
     this.upAxis = up;

@@ -1,79 +1,146 @@
 // Repository-owned TSOG v4 decoder, based on Xiaomi Research's format/encoder.
 // Paper, original repository, compatibility notes and licenses: TSOG.md and THIRD_PARTY.md.
-import { boundsForModel, covarianceFromQuaternion } from "./ftgs.js?v=5";
-import { openZip } from "./zip.js?v=5";
-import { AttributeImages } from "./webp.js?v=5";
+import { boundsForModel, covarianceFromQuaternion } from "./ftgs.js?v=6";
+import { openZip } from "./zip.js?v=6";
+import { AttributeImages } from "./webp.js?v=6";
+import {
+  validatePlaybackMetadata,
+  audioMimeType,
+  MAX_AUDIO_BYTES,
+} from "./playback.js?v=6";
 
-const invalid = (message) => { throw new Error(`Invalid TSOG: ${message}`); };
-const integer = (value, max = Number.MAX_SAFE_INTEGER) =>
+const invalid = (message) => {
+  throw new Error(`Invalid TSOG: ${message}`);
+};
+const positiveInteger = (value, max = Number.MAX_SAFE_INTEGER) =>
   Number.isSafeInteger(value) && value > 0 && value <= max;
-const files = (group, sizes, name) => {
-  if (!group || !Array.isArray(group.files) || !sizes.includes(group.files.length) ||
-      group.files.some((file) => typeof file !== "string" || !file.length) ||
-      new Set(group.files).size !== group.files.length)
+const validateFiles = (group, sizes, name) => {
+  if (
+    !group ||
+    !Array.isArray(group.files) ||
+    !sizes.includes(group.files.length) ||
+    group.files.some((file) => typeof file !== "string" || !file.length) ||
+    new Set(group.files).size !== group.files.length
+  )
     invalid(`${name} has missing or invalid image filenames.`);
 };
-const ranges = (mins, maxs, count, name) => {
-  if (!Array.isArray(mins) || !Array.isArray(maxs) || mins.length !== count || maxs.length !== count ||
-      mins.some((min, i) => !Number.isFinite(min) || !Number.isFinite(maxs[i]) || min > maxs[i]))
+const validateRanges = (mins, maxs, count, name) => {
+  if (
+    !Array.isArray(mins) ||
+    !Array.isArray(maxs) ||
+    mins.length !== count ||
+    maxs.length !== count ||
+    mins.some(
+      (min, i) =>
+        !Number.isFinite(min) || !Number.isFinite(maxs[i]) || min > maxs[i],
+    )
+  )
     invalid(`${name} has invalid attribute ranges.`);
 };
-const codebook = (group, name) => {
-  if (!Array.isArray(group.codebook) || !integer(group.codebook.length, 256) ||
-      group.codebook.some((value) => !Number.isFinite(Math.fround(value))))
+const validateCodebook = (group, name) => {
+  if (
+    !Array.isArray(group.codebook) ||
+    !positiveInteger(group.codebook.length, 256) ||
+    group.codebook.some((value) => !Number.isFinite(Math.fround(value)))
+  )
     invalid(`${name} has an invalid codebook.`);
 };
 
-export function validateTSOGMetadata(meta) {
-  if (!meta || meta.version !== 4) invalid("only the original exporter's version 4 is supported.");
-  if (!integer(meta.count)) invalid("count must be a positive integer.");
-  files(meta.means, [2], "means");
-  ranges(meta.means.mins, meta.means.maxs, 3, "means");
-  for (const group of ["scales", "sh0"]) {
-    files(meta[group], [1], group);
-    codebook(meta[group], group);
+const lookup = (book, index) => {
+  if (index >= book.length)
+    invalid("an image references a missing codebook entry.");
+  return book[index];
+};
+const finite = (value) => {
+  if (!Number.isFinite(Math.fround(value)))
+    invalid("an attribute exceeds float32 range.");
+  return value;
+};
+
+function unpackQuaternion(bytes, offset) {
+  const omitted = bytes[offset + 3] - 252;
+  if (omitted < 0 || omitted > 3)
+    invalid("invalid smallest-three quaternion tag.");
+  const quaternion = [0, 0, 0, 0];
+  let channel = 0;
+  let squared = 0;
+  for (let component = 0; component < 4; component++) {
+    if (component === omitted) continue;
+    const value = ((bytes[offset + channel++] / 255) * 2 - 1) / Math.SQRT2;
+    quaternion[component] = value;
+    squared += value * value;
   }
-  files(meta.quats, [1], "quats");
+  quaternion[omitted] = Math.sqrt(Math.max(0, 1 - squared));
+  return quaternion;
+}
+
+export function validateTSOGMetadata(meta) {
+  if (!meta || meta.version !== 4)
+    invalid("only the original exporter's version 4 is supported.");
+  if (!positiveInteger(meta.count))
+    invalid("count must be a positive integer.");
+  validateFiles(meta.means, [2], "means");
+  validateRanges(meta.means.mins, meta.means.maxs, 3, "means");
+  for (const group of ["scales", "sh0"]) {
+    validateFiles(meta[group], [1], group);
+    validateCodebook(meta[group], group);
+  }
+  validateFiles(meta.quats, [1], "quats");
   if (meta.shN !== undefined) {
-    files(meta.shN, [2], "shN");
-    codebook(meta.shN, "shN");
-    if (!integer(meta.shN.bands, 3) || !integer(meta.shN.count, 65536))
+    validateFiles(meta.shN, [2], "shN");
+    validateCodebook(meta.shN, "shN");
+    if (
+      !positiveInteger(meta.shN.bands, 3) ||
+      !positiveInteger(meta.shN.count, 65536)
+    )
       invalid("SH bands or palette count are unsupported.");
   }
   if (meta.fps !== undefined && (!Number.isFinite(meta.fps) || meta.fps <= 0))
     invalid("fps must be positive.");
   if (meta.timeline !== undefined) {
     const timeline = meta.timeline;
-    files(timeline, [2], "timeline");
+    validateFiles(timeline, [2], "timeline");
     if (timeline.type === 1) {
       // The v4 exporter uses type 1 for center/scale; see TSOG.md.
-      ranges(timeline.mins, timeline.maxs, 2, "timeline");
-      if (!(Math.fround(timeline.mins[1]) > 0)) invalid("temporal scales must be positive standard deviations.");
+      validateRanges(timeline.mins, timeline.maxs, 2, "timeline");
+      if (!(Math.fround(timeline.mins[1]) > 0))
+        invalid("temporal scales must be positive standard deviations.");
     } else if (timeline.type === 0) {
-      if (!integer(timeline.N, 65536) || timeline.delta !== Math.floor(65536 / timeline.N))
-        invalid("discrete timeline has an invalid frame count or quantization step.");
+      if (
+        !positiveInteger(timeline.N, 65536) ||
+        timeline.delta !== Math.floor(65536 / timeline.N)
+      )
+        invalid(
+          "discrete timeline has an invalid frame count or quantization step.",
+        );
     } else invalid(`unsupported timeline type ${timeline.type}.`);
   }
   if (meta.temporal !== undefined) {
-    if (!meta.temporal || Object.keys(meta.temporal).some((key) => key !== "means"))
+    if (
+      !meta.temporal ||
+      Object.keys(meta.temporal).some((key) => key !== "means")
+    )
       invalid("only first-order translation motion is supported.");
     const motion = meta.temporal.means;
-    files(motion, [1, 2], "temporal.means");
+    validateFiles(motion, [1, 2], "temporal.means");
     if (motion.mins?.length !== 1 || motion.maxs?.length !== 1)
       invalid("only first-order translation motion is supported.");
-    ranges(motion.mins[0], motion.maxs[0], 3, "temporal.means");
+    validateRanges(motion.mins[0], motion.maxs[0], 3, "temporal.means");
     if (!meta.timeline) invalid("motion requires a timeline.");
   }
+  validatePlaybackMetadata(meta);
   return meta;
 }
 
 /** Decode attribute images supplied by an async filename -> { width, height, rgba } callback. */
-export async function decodeTSOG(meta, loadImage, {
-  maxPoints = 1000000, signal, onProgress = () => {},
-} = {}) {
+export async function decodeTSOG(
+  meta,
+  loadImage,
+  { maxPoints = 1000000, signal, onProgress = () => {} } = {},
+) {
   signal?.throwIfAborted();
   validateTSOGMetadata(meta);
-  if (maxPoints !== Infinity && !integer(maxPoints))
+  if (maxPoints !== Infinity && !positiveInteger(maxPoints))
     throw new Error("Point limit must be a positive integer.");
   const count = Math.min(meta.count, maxPoints);
   const degree = meta.shN?.bands ?? 0;
@@ -81,12 +148,24 @@ export async function decodeTSOG(meta, loadImage, {
   // Internal modes: 0 = continuous Gaussian, 1 = discrete frame, 2 = static.
   const timelineMode = !meta.timeline ? 2 : meta.timeline.type === 0 ? 1 : 0;
   const model = {
-    format: "tsog", timelineMode, count, sourceCount: meta.count, degree, coefficients,
-    nFrames: timelineMode === 1 ? meta.timeline.N : timelineMode === 2 ? 1 : null,
-    fps: meta.fps ?? null, useVelocity: timelineMode === 0 && Boolean(meta.temporal), opacityFloor: 0,
-    positionTime: new Float32Array(count * 4), velocityDuration: new Float32Array(count * 4),
-    covarianceA: new Float32Array(count * 4), covarianceB: new Float32Array(count * 4),
-    sh: new Float32Array(count * coefficients * 4), alpha: new Float32Array(count),
+    format: "tsog",
+    timelineMode,
+    count,
+    sourceCount: meta.count,
+    degree,
+    coefficients,
+    nFrames:
+      timelineMode === 1 ? meta.timeline.N : timelineMode === 2 ? 1 : null,
+    fps: meta.fps ?? null,
+    playback: meta.playback ? { ...meta.playback } : null,
+    useVelocity: timelineMode === 0 && Boolean(meta.temporal),
+    opacityFloor: 0,
+    positionTime: new Float32Array(count * 4),
+    velocityDuration: new Float32Array(count * 4),
+    covarianceA: new Float32Array(count * 4),
+    covarianceB: new Float32Array(count * 4),
+    sh: new Float32Array(count * coefficients * 4),
+    alpha: new Float32Array(count),
   };
   let dimensions;
   const image = async (name, gaussian = true) => {
@@ -94,12 +173,18 @@ export async function decodeTSOG(meta, loadImage, {
     const result = await loadImage(name);
     signal?.throwIfAborted();
     const { width, height, rgba } = result;
-    if (!integer(width) || !integer(height) || !(rgba instanceof Uint8Array || rgba instanceof Uint8ClampedArray) || rgba.length !== width * height * 4)
+    if (
+      !positiveInteger(width) ||
+      !positiveInteger(height) ||
+      !(rgba instanceof Uint8Array || rgba instanceof Uint8ClampedArray) ||
+      rgba.length !== width * height * 4
+    )
       invalid(`invalid RGBA image '${name}'.`);
     if (gaussian) {
       if (width * height < meta.count) invalid(`too few pixels in '${name}'.`);
       dimensions ??= [width, height];
-      if (width !== dimensions[0] || height !== dimensions[1]) invalid(`mismatched image size in '${name}'.`);
+      if (width !== dimensions[0] || height !== dimensions[1])
+        invalid(`mismatched image size in '${name}'.`);
     }
     return result;
   };
@@ -112,28 +197,29 @@ export async function decodeTSOG(meta, loadImage, {
     for (let first = 0; first < count; first += 16384) {
       signal?.throwIfAborted();
       for (let i = first; i < Math.min(first + 16384, count); i++)
-        operation(i, 4 * Math.floor(i * meta.count / count), i * 4);
+        operation(i, 4 * Math.floor((i * meta.count) / count), i * 4);
       // Let cancellation, navigation, and the loading UI run between chunks.
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     signal?.throwIfAborted();
     onProgress(progress);
   };
-  const value16 = (low, high, i, min, max) => min + (max - min) * (low[i] + 256 * high[i]) / 65535;
-  const lookup = (book, index) => {
-    if (index >= book.length) invalid("an image references a missing codebook entry.");
-    return book[index];
-  };
-  const finite = (value) => {
-    if (!Number.isFinite(Math.fround(value))) invalid("an attribute exceeds float32 range.");
-    return value;
-  };
+  const value16 = (low, high, i, min, max) =>
+    min + ((max - min) * (low[i] + 256 * high[i])) / 65535;
   {
     const [low, high] = await pair(meta.means);
     await rows((i, s, o) => {
       for (let a = 0; a < 3; a++) {
-        const log = value16(low, high, s + a, meta.means.mins[a], meta.means.maxs[a]);
-        model.positionTime[o + a] = finite(Math.sign(log) * Math.expm1(Math.abs(log)));
+        const log = value16(
+          low,
+          high,
+          s + a,
+          meta.means.mins[a],
+          meta.means.maxs[a],
+        );
+        model.positionTime[o + a] = finite(
+          Math.sign(log) * Math.expm1(Math.abs(log)),
+        );
       }
       model.velocityDuration[o + 3] = 1;
     }, 0.2);
@@ -142,16 +228,10 @@ export async function decodeTSOG(meta, loadImage, {
     const scales = (await image(meta.scales.files[0])).rgba;
     const quats = (await image(meta.quats.files[0])).rgba;
     await rows((i, s, o) => {
-      const omitted = quats[s + 3] - 252;
-      if (omitted < 0 || omitted > 3) invalid("invalid smallest-three quaternion tag.");
-      const q = [0, 0, 0, 0];
-      let channel = 0, squared = 0;
-      for (let a = 0; a < 4; a++) if (a !== omitted) {
-        q[a] = (quats[s + channel++] / 255 * 2 - 1) / Math.SQRT2;
-        squared += q[a] ** 2;
-      }
-      q[omitted] = Math.sqrt(Math.max(0, 1 - squared));
-      const covariance = covarianceFromQuaternion(q, [0, 1, 2].map((a) => lookup(meta.scales.codebook, scales[s + a]))).map(finite);
+      const covariance = covarianceFromQuaternion(
+        unpackQuaternion(quats, s),
+        [0, 1, 2].map((a) => lookup(meta.scales.codebook, scales[s + a])),
+      ).map(finite);
       model.covarianceA.set(covariance.slice(0, 4), o);
       model.covarianceB.set(covariance.slice(4), o);
     }, 0.4);
@@ -159,7 +239,11 @@ export async function decodeTSOG(meta, loadImage, {
   {
     const colors = (await image(meta.sh0.files[0])).rgba;
     await rows((i, s, o) => {
-      for (let a = 0; a < 3; a++) model.sh[i * coefficients * 4 + a] = lookup(meta.sh0.codebook, colors[s + a]);
+      for (let a = 0; a < 3; a++)
+        model.sh[i * coefficients * 4 + a] = lookup(
+          meta.sh0.codebook,
+          colors[s + a],
+        );
       model.alpha[i] = model.covarianceB[o + 2] = colors[s + 3] / 255;
     }, 0.5);
   }
@@ -168,21 +252,31 @@ export async function decodeTSOG(meta, loadImage, {
     const timeline = meta.timeline;
     await rows((i, s, o) => {
       if (timelineMode === 1) {
-        model.positionTime[o + 3] = Math.min(timeline.N - 1, Math.floor((low[s] + 256 * high[s]) / timeline.delta));
+        model.positionTime[o + 3] = Math.min(
+          timeline.N - 1,
+          Math.floor((low[s] + 256 * high[s]) / timeline.delta),
+        );
       } else {
-        model.positionTime[o + 3] = finite(value16(low, high, s, timeline.mins[0], timeline.maxs[0]));
-        model.velocityDuration[o + 3] = finite(value16(low, high, s + 1, timeline.mins[1], timeline.maxs[1]));
+        model.positionTime[o + 3] = finite(
+          value16(low, high, s, timeline.mins[0], timeline.maxs[0]),
+        );
+        model.velocityDuration[o + 3] = finite(
+          value16(low, high, s + 1, timeline.mins[1], timeline.maxs[1]),
+        );
       }
     }, 0.65);
   }
-  if (meta.temporal) {
+  if (model.useVelocity) {
     const motion = meta.temporal.means;
     const [low, high] = await pair(motion);
     await rows((i, s, o) => {
       for (let a = 0; a < 3; a++) {
-        const min = motion.mins[0][a], max = motion.maxs[0][a];
-        const value = high ? value16(low, high, s + a, min, max) : min + (max - min) * low[s + a] / 255;
-        if (model.useVelocity) model.velocityDuration[o + a] = finite(value);
+        const min = motion.mins[0][a],
+          max = motion.maxs[0][a];
+        const value = high
+          ? value16(low, high, s + a, min, max)
+          : min + ((max - min) * low[s + a]) / 255;
+        model.velocityDuration[o + a] = finite(value);
       }
     }, 0.75);
   }
@@ -190,13 +284,21 @@ export async function decodeTSOG(meta, loadImage, {
     const palette = await image(meta.shN.files[0], false);
     const labels = (await image(meta.shN.files[1])).rgba;
     const rest = coefficients - 1;
-    if (palette.width !== 64 * rest || palette.height !== Math.ceil(meta.shN.count / 64))
+    if (
+      palette.width !== 64 * rest ||
+      palette.height !== Math.ceil(meta.shN.count / 64)
+    )
       invalid("invalid SH centroid image size.");
     await rows((i, s) => {
       const label = labels[s] + 256 * labels[s + 1];
-      if (label >= meta.shN.count) invalid("an SH label exceeds the palette count.");
-      for (let c = 0; c < rest; c++) for (let a = 0; a < 3; a++)
-        model.sh[(i * coefficients + c + 1) * 4 + a] = lookup(meta.shN.codebook, palette.rgba[(label * rest + c) * 4 + a]);
+      if (label >= meta.shN.count)
+        invalid("an SH label exceeds the palette count.");
+      for (let c = 0; c < rest; c++)
+        for (let a = 0; a < 3; a++)
+          model.sh[(i * coefficients + c + 1) * 4 + a] = lookup(
+            meta.shN.codebook,
+            palette.rgba[(label * rest + c) * 4 + a],
+          );
     }, 0.95);
   }
   model.bounds = boundsForModel(model.positionTime);
@@ -209,13 +311,38 @@ export async function decodeTSOG(meta, loadImage, {
 export async function readTSOG(blob, options = {}) {
   const archive = await openZip(blob, options.signal);
   let meta;
-  try { meta = JSON.parse(new TextDecoder().decode(await archive.read("meta.json", 4 * 1024 * 1024))); }
-  catch (error) {
+  try {
+    meta = JSON.parse(
+      new TextDecoder().decode(
+        await archive.read("meta.json", 4 * 1024 * 1024),
+      ),
+    );
+  } catch (error) {
     if (error instanceof SyntaxError) invalid("meta.json is not valid JSON.");
     throw error;
   }
   const images = new AttributeImages();
   try {
-    return await decodeTSOG(meta, async (name) => images.decode(await archive.read(name), options.signal), options);
-  } finally { images.destroy(); }
+    validateTSOGMetadata(meta);
+    const audio = meta.audio
+      ? {
+          ...meta.audio,
+          blob: new Blob(
+            [await archive.read(meta.audio.file, MAX_AUDIO_BYTES)],
+            {
+              type: meta.audio.mimeType ?? audioMimeType(meta.audio.file),
+            },
+          ),
+        }
+      : null;
+    if (audio && !audio.blob.size) invalid("the embedded audio file is empty.");
+    const model = await decodeTSOG(
+      meta,
+      async (name) => images.decode(await archive.read(name), options.signal),
+      options,
+    );
+    return { ...model, audio };
+  } finally {
+    images.destroy();
+  }
 }

@@ -354,7 +354,9 @@ from a URL and runs entirely in the browser with WebGL2. Drop a file to play it
 in a full-window canvas with a full-width timeline and controls that fade when idle. It supports
 seeking, automatic looping, orbit/pan/zoom, and WASD movement (Q/E down/up,
 Shift for faster movement). It runs as a static site
-without a build step or package installation.
+without a build step or package installation. Packaged `.tsog` files can also
+carry optional audio and playback defaults (duration, FPS, speed and looping);
+see the [metadata layout and packaging tool](player/TSOG.md#audio-and-playback-metadata).
 
 On compatible devices, the **AR** button opens a WebXR session with tap-to-place
 and animated playback. Use HTTPS (or localhost); see the

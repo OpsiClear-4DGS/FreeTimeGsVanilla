@@ -181,6 +181,15 @@ export class FTGSEmbed extends EventTarget {
   seek(time) {
     return this.#request("seek", [time]);
   }
+  setPlaybackRate(rate) {
+    return this.#request("setPlaybackRate", [rate]);
+  }
+  setMuted(muted) {
+    return this.#request("setMuted", [muted]);
+  }
+  setVolume(volume) {
+    return this.#request("setVolume", [volume]);
+  }
   setView(view) {
     return this.#request("setView", [view]);
   }

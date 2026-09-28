@@ -1,7 +1,13 @@
-import { readModel } from "./model.js?v=5";
+import { readModel } from "./model.js?v=6";
 import { OrbitCamera, validateCameraView } from "./camera.js?v=4";
-import { SplatRenderer } from "./renderer.js?v=5";
+import { SplatRenderer } from "./renderer.js?v=6";
 import { ARPresentation, isARSupported } from "./xr.js?v=4";
+import { AudioTrack } from "./audio.js?v=6";
+import {
+  resolvePlayback,
+  validatePlaybackRate,
+  validateVolume,
+} from "./playback.js?v=6";
 
 export const PLAYER_EVENTS = Object.freeze([
   "loadstart",
@@ -14,6 +20,8 @@ export const PLAYER_EVENTS = Object.freeze([
   "abort",
   "error",
   "arstatechange",
+  "audiochange",
+  "ratechange",
   "destroy",
 ]);
 const owners = new WeakMap();
@@ -47,6 +55,8 @@ export class FTGSPlayer extends EventTarget {
   #ar = null;
   #arError = null;
   #xrOrder = null;
+  #audio = null;
+  #audioSuspended = false;
 
   static isARSupported() {
     return isARSupported();
@@ -56,8 +66,11 @@ export class FTGSPlayer extends EventTarget {
     canvas,
     {
       autoplay = true,
-      loop = true,
+      loop = null,
       fps = null,
+      playbackRate = null,
+      volume = null,
+      muted = false,
       maxPoints = 1000000,
       resolution = 1,
       frames = null,
@@ -71,6 +84,12 @@ export class FTGSPlayer extends EventTarget {
       throw new Error("This canvas already has a player.");
     if (fps !== null && (!Number.isFinite(fps) || fps <= 0))
       throw new RangeError("fps must be a positive number.");
+    if (playbackRate !== null) validatePlaybackRate(playbackRate);
+    if (volume !== null) validateVolume(volume);
+    if (loop !== null && typeof loop !== "boolean")
+      throw new TypeError("loop must be a boolean or null.");
+    if (typeof muted !== "boolean")
+      throw new TypeError("muted must be a boolean.");
     if (
       maxPoints !== Infinity &&
       (!Number.isSafeInteger(maxPoints) || maxPoints < 1)
@@ -83,8 +102,11 @@ export class FTGSPlayer extends EventTarget {
     if (!["y", "z"].includes(up)) throw new TypeError("up must be y or z.");
     this.#options = {
       autoplay: Boolean(autoplay),
-      loop: Boolean(loop),
+      loop,
       fps,
+      playbackRate,
+      volume,
+      muted,
       maxPoints,
       resolution,
       frames,
@@ -148,6 +170,12 @@ export class FTGSPlayer extends EventTarget {
   get fps() {
     return this.#options.fps ?? this.#model?.fps ?? 30;
   }
+  get playbackRate() {
+    return this.#options.playbackRate ?? this.#model?.playbackRate ?? 1;
+  }
+  get loop() {
+    return this.#options.loop ?? this.#model?.loop ?? true;
+  }
   get frameIndex() {
     if (!this.#model) return 0;
     const { nFrames, timelineMode } = this.#model;
@@ -156,9 +184,7 @@ export class FTGSPlayer extends EventTarget {
       : Math.round(this.#time * (nFrames - 1));
   }
   get duration() {
-    if (!this.#model) return 0;
-    const { nFrames, timelineMode } = this.#model;
-    return Math.max(1, nFrames - (timelineMode === 1 ? 0 : 1)) / this.fps;
+    return this.#model?.duration ?? 0;
   }
   get state() {
     return {
@@ -169,19 +195,37 @@ export class FTGSPlayer extends EventTarget {
       currentTime: this.#time * this.duration,
       duration: this.duration,
       fps: this.fps,
-      loop: this.#options.loop,
+      loop: this.loop,
+      playbackRate: this.playbackRate,
+      playable: this.#model?.playable ?? false,
       nFrames: this.#model?.nFrames ?? 0,
       frameIndex: this.frameIndex,
       format: this.#model?.format ?? null,
       timeline: this.#model
-        ? ["continuous", "discrete", "static"][this.#model.timelineMode] : null,
+        ? ["continuous", "discrete", "static"][this.#model.timelineMode]
+        : null,
       name: this.#model?.name ?? "",
       pointCount: this.#model?.count ?? 0,
       sourceCount: this.#model?.sourceCount ?? 0,
       progress: this.#progress,
       error: this.#error,
+      audio: {
+        available: Boolean(this.#audio),
+        muted: this.#options.muted,
+        volume: this.#options.volume ?? this.#model?.volume ?? 1,
+        ...(this.#audio?.state ?? {
+          status: "none",
+          currentTime: 0,
+          duration: null,
+          error: null,
+        }),
+      },
       ar: {
-        status: this.#ar ? (this.#ar.active ? "presenting" : "starting") : "inactive",
+        status: this.#ar
+          ? this.#ar.active
+            ? "presenting"
+            : "starting"
+          : "inactive",
         placed: this.#ar?.placed ?? false,
         hitTest: Boolean(this.#ar?.hitSource),
         surface: this.#ar?.surface ?? false,
@@ -229,6 +273,7 @@ export class FTGSPlayer extends EventTarget {
     this.#progress = 0;
     this.pause();
     this.#emit("loadstart");
+    let pendingAudio;
     try {
       let blob = input;
       if (typeof input === "string" || input instanceof URL) {
@@ -265,9 +310,19 @@ export class FTGSPlayer extends EventTarget {
       });
       controller.signal.throwIfAborted();
       if (generation !== this.#generation) throw aborted();
-      const worker = new Worker(new URL("./sort-worker.js?v=5", import.meta.url), {
-        type: "module",
-      });
+      const playback = resolvePlayback(data, this.#options);
+      if (data.audio) {
+        const track = new AudioTrack(data.audio.blob, () => {
+          if (this.#audio === track) this.#emit("audiochange");
+        });
+        pendingAudio = track;
+      }
+      const worker = new Worker(
+        new URL("./sort-worker.js?v=6", import.meta.url),
+        {
+          type: "module",
+        },
+      );
       try {
         this.#renderer.setModel(data);
         this.#connectWorker(worker, data);
@@ -278,20 +333,24 @@ export class FTGSPlayer extends EventTarget {
       this.#model = {
         name: name ?? blob.name ?? "FTGS model",
         degree: data.degree,
-        nFrames: data.timelineMode === 0
-          ? this.#options.frames ?? data.nFrames ?? 300 : data.nFrames,
-        fps: data.fps,
+        ...playback,
+        volume: data.audio?.volume ?? 1,
         format: data.format,
         timelineMode: data.timelineMode,
         count: data.count,
         sourceCount: data.sourceCount,
       };
+      this.#audio?.destroy();
+      this.#audio = pendingAudio ?? null;
+      pendingAudio = null;
+      this.#audioSuspended = false;
       this.#view = view;
       this.#camera.fit(data.bounds);
       if (view) this.#camera.restore(view);
       this.#status = "ready";
       this.#progress = 1;
       this.#time = 0;
+      this.#syncAudio(true);
       this.#dirty = true;
       this.#revision++;
       this.#emit("loaded");
@@ -301,6 +360,7 @@ export class FTGSPlayer extends EventTarget {
       if (autoplay && !document.hidden) this.play();
       return this.state;
     } catch (error) {
+      pendingAudio?.destroy();
       if (generation !== this.#generation || this.#status === "destroyed")
         throw aborted();
       if (controller.signal.aborted) {
@@ -322,20 +382,23 @@ export class FTGSPlayer extends EventTarget {
     if (
       !this.#model ||
       this.#status === "loading" ||
-      this.#model.nFrames === 1 ||
+      !this.#model.playable ||
       !this.#worker
     )
       return this.state;
     if (this.#time === 1) this.seek(0);
+    this.#audio?.retry();
     if (!this.#playing) {
       this.#playing = true;
       this.#previousTick = performance.now();
       this.#emit("play");
     }
+    this.#syncAudio(true);
     return this.state;
   }
 
   pause() {
+    this.#audio?.pause();
     if (this.#playing) {
       this.#playing = false;
       this.#emit("pause");
@@ -354,7 +417,46 @@ export class FTGSPlayer extends EventTarget {
     this.#dirty = true;
     this.#revision++;
     this.#xrOrder = null;
+    this.#syncAudio(true);
     this.#emit("timeupdate");
+    return this.state;
+  }
+
+  #syncAudio(seek = false) {
+    this.#audio?.sync(
+      this.#time * this.duration,
+      {
+        playing: this.#playing && !this.#audioSuspended,
+        playbackRate: this.playbackRate,
+        muted: this.#options.muted,
+        volume: this.#options.volume ?? this.#model?.volume ?? 1,
+      },
+      seek,
+    );
+  }
+  setPlaybackRate(rate) {
+    this.#assertAlive();
+    this.#options.playbackRate = validatePlaybackRate(rate);
+    this.#previousTick = performance.now();
+    this.#syncAudio(true);
+    this.#emit("ratechange");
+    return this.state;
+  }
+  setMuted(muted) {
+    this.#assertAlive();
+    if (typeof muted !== "boolean")
+      throw new TypeError("muted must be a boolean.");
+    this.#options.muted = muted;
+    this.#audio?.retry();
+    this.#syncAudio(true);
+    this.#emit("audiochange");
+    return this.state;
+  }
+  setVolume(volume) {
+    this.#assertAlive();
+    this.#options.volume = validateVolume(volume);
+    this.#syncAudio();
+    this.#emit("audiochange");
     return this.state;
   }
 
@@ -397,6 +499,8 @@ export class FTGSPlayer extends EventTarget {
     this.#arError = null;
     this.#camera.stopMoving();
     this.#camera.enabled = false;
+    this.#audioSuspended = true;
+    this.#audio?.pause();
     this.#revision++;
     this.#xrOrder = null;
     const ar = new ARPresentation(this.#renderer, {
@@ -419,6 +523,8 @@ export class FTGSPlayer extends EventTarget {
         this.#revision++;
         this.#dirty = true;
         this.#previousTick = performance.now();
+        this.#audioSuspended = false;
+        this.#syncAudio(true);
         if (this.#status !== "destroyed") this.#emit("arstatechange");
       },
     });
@@ -426,7 +532,8 @@ export class FTGSPlayer extends EventTarget {
     this.#emit("arstatechange");
     try {
       await ar.start(overlayRoot);
-      if (this.#ar !== ar) throw new DOMException("AR was cancelled.", "AbortError");
+      if (this.#ar !== ar)
+        throw new DOMException("AR was cancelled.", "AbortError");
       this.#previousTick = performance.now();
       this.#emit("arstatechange");
       return this.state;
@@ -489,13 +596,14 @@ export class FTGSPlayer extends EventTarget {
         if (request.xr) {
           if (this.#ar?.active)
             this.#xrOrder = { order: result.order, time: request.time };
-        } else if (!this.#ar) this.#renderer.draw(
-          result.order,
-          request.camera,
-          request.time,
-          this.#model.degree,
-          this.#options.resolution,
-        );
+        } else if (!this.#ar)
+          this.#renderer.draw(
+            result.order,
+            request.camera,
+            request.time,
+            this.#model.degree,
+            this.#options.resolution,
+          );
       } catch (error) {
         fail(error);
       }
@@ -505,13 +613,17 @@ export class FTGSPlayer extends EventTarget {
   }
 
   #advance(now) {
-    const elapsed = Math.max(0, Math.min((now - this.#previousTick) / 1000, 0.25));
+    const elapsed = Math.max(
+      0,
+      Math.min((now - this.#previousTick) / 1000, 0.25),
+    );
     this.#previousTick = now;
     if (this.#playing) {
-      const next = this.#time + elapsed / this.duration;
-      this.#time = this.#options.loop ? next % 1 : Math.min(1, next);
+      const next = this.#time + (elapsed * this.playbackRate) / this.duration;
+      this.#time = this.loop ? next % 1 : Math.min(1, next);
       this.#dirty = true;
-      if (!this.#options.loop && next >= 1) {
+      this.#syncAudio(next >= 1);
+      if (!this.loop && next >= 1) {
         this.pause();
         this.#emit("timeupdate");
         this.#emit("ended");
@@ -530,7 +642,9 @@ export class FTGSPlayer extends EventTarget {
     const time = this.#model.timelineMode === 1 ? this.frameIndex : this.#time;
     this.#pending = { time, camera, revision: this.#revision, xr };
     this.#worker.postMessage({
-      type: "sort", time, view: camera.view,
+      type: "sort",
+      time,
+      view: camera.view,
       // Retain behind-camera centers in XR: a newer tracked pose can reveal them
       // before the next asynchronous sort. Each eye clips its own near plane.
       near: xr ? -Infinity : camera.near,
@@ -540,8 +654,11 @@ export class FTGSPlayer extends EventTarget {
   #xrFrame = (now, frame) => {
     if (!frame || !this.#model || !this.#ar?.active) {
       this.#previousTick = now;
+      this.#audioSuspended = true;
+      this.#audio?.pause();
       return;
     }
+    this.#audioSuspended = false;
     this.#advance(now);
     if (!this.#ar?.active) return; // A playback event may unload or destroy us.
     this.#sort(frame.camera, true);
@@ -550,8 +667,12 @@ export class FTGSPlayer extends EventTarget {
     // Reuse the most recent time-consistent order for both eyes.
     for (const { camera, viewport } of frame.views)
       this.#renderer.draw(
-        this.#xrOrder.order, camera, this.#xrOrder.time,
-        this.#model.degree, this.#options.resolution, viewport,
+        this.#xrOrder.order,
+        camera,
+        this.#xrOrder.time,
+        this.#model.degree,
+        this.#options.resolution,
+        viewport,
       );
   };
 
@@ -575,6 +696,8 @@ export class FTGSPlayer extends EventTarget {
     this.#status = "destroyed";
     void this.exitAR();
     this.#playing = false;
+    this.#audio?.destroy();
+    this.#audio = null;
     cancelAnimationFrame(this.#raf);
     this.#events.abort();
     this.#resize?.disconnect();

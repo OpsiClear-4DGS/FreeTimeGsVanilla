@@ -1,13 +1,14 @@
-import { FTGSPlayer } from "./player.js?v=5";
-import { attachPlayerBridge } from "./bridge.js?v=5";
+import { FTGSPlayer } from "./player.js?v=6";
+import { attachPlayerBridge } from "./bridge.js?v=6";
 import { demoFile } from "./demo.js";
-import { mountPlayerShell } from "./shell.js?v=5";
+import { mountPlayerShell } from "./shell.js?v=6";
 
 mountPlayerShell(document.getElementById("viewer"));
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 const requestedFps = Number(query.get("fps"));
-const fps = Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : null;
+const fps =
+  Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : null;
 const requestedPoints = Number(query.get("points"));
 const maxPoints =
   query.get("points") === "all"
@@ -16,6 +17,8 @@ const maxPoints =
       ? requestedPoints
       : 1000000;
 const requestedFrames = Number(query.get("frames"));
+const requestedRate = Number(query.get("speed"));
+const requestedVolume = Number(query.get("volume"));
 const showControls = query.get("controls") !== "0";
 const events = new AbortController();
 const options = { signal: events.signal };
@@ -55,7 +58,11 @@ function updateFullscreen() {
 function wakeControls() {
   clearTimeout(idleTimer);
   $("viewer").classList.remove("idle");
-  if (player?.playing && player.state.status !== "loading" && player.state.ar.status === "inactive")
+  if (
+    player?.playing &&
+    player.state.status !== "loading" &&
+    player.state.ar.status === "inactive"
+  )
     idleTimer = setTimeout(() => $("viewer").classList.add("idle"), 1800);
 }
 function status(text = "", state = "ready", timeout = 0) {
@@ -95,18 +102,64 @@ function updatePlaying() {
     : "Play (Space)";
   wakeControls();
 }
+function updateAudio(state) {
+  const audio = state.audio;
+  $("audio-controls").hidden = !audio.available;
+  const blocked = audio.status === "blocked";
+  const silent =
+    audio.muted || audio.volume === 0 || blocked || audio.status === "error";
+  const label =
+    audio.status === "error"
+      ? "Audio unavailable"
+      : blocked
+        ? "Enable audio"
+        : silent
+          ? "Unmute"
+          : "Mute";
+  $("mute-toggle").disabled =
+    audio.status === "error" || state.status === "loading";
+  $("mute-toggle").setAttribute("aria-label", label);
+  $("mute-toggle").setAttribute("aria-pressed", String(audio.muted));
+  $("mute-toggle").dataset.tooltip = audio.error ?? `${label} (M)`;
+  $("audio-icon").setAttribute("href", silent ? "#silent" : "#sound");
+  $("volume").value = audio.volume;
+}
+function updateRate(state) {
+  const select = $("playback-rate");
+  select.querySelector("[data-custom]")?.remove();
+  if (
+    ![...select.options].some(
+      (option) => Number(option.value) === state.playbackRate,
+    )
+  ) {
+    const option = new Option(
+      `${state.playbackRate}×`,
+      String(state.playbackRate),
+    );
+    option.dataset.custom = "true";
+    select.add(option);
+  }
+  select.value = state.playbackRate;
+  select.disabled = !state.playable || state.status === "loading";
+}
 function updateAR() {
   const state = player.state;
   const { ar } = state;
   const active = ar.status === "presenting";
   $("viewer").dataset.ar = ar.status;
   $("ar").hidden = !arSupported;
-  $("ar").disabled = !state.loaded || state.status === "loading" || ar.status === "starting";
+  $("ar").disabled =
+    !state.loaded || state.status === "loading" || ar.status === "starting";
   $("ar").setAttribute("aria-pressed", String(active));
   $("ar").setAttribute("aria-label", active ? "Exit AR" : "View in AR");
   $("ar").dataset.tooltip = active ? "Exit AR" : "View in AR";
-  $("reset-view").setAttribute("aria-label", active ? "Reposition" : "Reset view");
-  $("reset-view").dataset.tooltip = active ? "Reposition (R)" : "Reset view (R)";
+  $("reset-view").setAttribute(
+    "aria-label",
+    active ? "Reposition" : "Reset view",
+  );
+  $("reset-view").dataset.tooltip = active
+    ? "Reposition (R)"
+    : "Reset view (R)";
   $("ar-hint").hidden = !active;
   $("ar-hint").textContent = ar.placed
     ? "Placed · Reset to reposition"
@@ -152,11 +205,21 @@ try {
         : null,
     autoplay:
       query.get("autoplay") !== "0" && $("viewer").dataset.autoplay !== "false",
-    loop: query.get("loop") !== "0",
+    loop: query.has("loop") ? query.get("loop") !== "0" : null,
+    playbackRate:
+      requestedRate >= 0.25 && requestedRate <= 4 ? requestedRate : null,
+    volume:
+      query.has("volume") &&
+      Number.isFinite(requestedVolume) &&
+      requestedVolume >= 0 &&
+      requestedVolume <= 1
+        ? requestedVolume
+        : null,
+    muted: query.get("muted") === "1",
   });
   player.addEventListener(
     "loadstart",
-    () => {
+    ({ detail }) => {
       $("empty").hidden = true;
       $("play-toggle").disabled =
         $("timeline").disabled =
@@ -164,6 +227,8 @@ try {
           true;
       delete $("timeline-area").dataset.preview;
       status("Opening…", "loading");
+      updateRate(detail);
+      updateAudio(detail);
     },
     options,
   );
@@ -184,11 +249,13 @@ try {
       );
       $("viewer").dataset.loaded = "true";
       $("controls").hidden = !showControls;
-      $("play-toggle").disabled = detail.nFrames === 1;
-      $("timeline").disabled = detail.nFrames === 1;
+      $("play-toggle").disabled = !detail.playable;
+      $("timeline").disabled = !detail.playable;
       $("reset-view").disabled = false;
       updateTime(detail);
       updatePlaying();
+      updateRate(detail);
+      updateAudio(detail);
       status(
         detail.pointCount < detail.sourceCount
           ? `Previewing ${detail.pointCount.toLocaleString()} of ${detail.sourceCount.toLocaleString()} Gaussians.`
@@ -203,10 +270,11 @@ try {
     "error",
     ({ detail }) => {
       $("controls").hidden = !showControls;
-      $("play-toggle").disabled = $("timeline").disabled =
-        !detail.loaded || detail.nFrames === 1;
+      $("play-toggle").disabled = $("timeline").disabled = !detail.playable;
       $("reset-view").disabled = !detail.loaded;
       status(detail.error, "error");
+      updateRate(detail);
+      updateAudio(detail);
     },
     options,
   );
@@ -214,10 +282,11 @@ try {
     "abort",
     ({ detail }) => {
       $("empty").hidden = detail.loaded;
-      $("play-toggle").disabled = $("timeline").disabled =
-        !detail.loaded || detail.nFrames === 1;
+      $("play-toggle").disabled = $("timeline").disabled = !detail.playable;
       $("reset-view").disabled = !detail.loaded;
       status("", detail.status);
+      updateRate(detail);
+      updateAudio(detail);
     },
     options,
   );
@@ -233,22 +302,64 @@ try {
   void checkAR();
   navigator.xr?.addEventListener("devicechange", checkAR, options);
   detachBridge = attachPlayerBridge(player, query.get("parentOrigin"));
+  player.addEventListener(
+    "audiochange",
+    ({ detail }) => updateAudio(detail),
+    options,
+  );
+  player.addEventListener(
+    "ratechange",
+    ({ detail }) => updateRate(detail),
+    options,
+  );
+  $("mute-toggle").addEventListener(
+    "click",
+    () => {
+      const audio = player.state.audio;
+      if (audio.volume === 0) player.setVolume(1);
+      player.setMuted(
+        audio.status === "blocked" || audio.volume === 0 ? false : !audio.muted,
+      );
+    },
+    options,
+  );
+  $("volume").addEventListener(
+    "input",
+    () => {
+      player.setVolume(Number($("volume").value));
+      player.setMuted(false);
+    },
+    options,
+  );
+  $("playback-rate").addEventListener(
+    "change",
+    () => player.setPlaybackRate(Number($("playback-rate").value)),
+    options,
+  );
 
-  $("ar").addEventListener("click", async () => {
-    try {
-      if (player.state.ar.status !== "inactive") await player.exitAR();
-      else {
-        const size = Number(query.get("arSize"));
-        await player.enterAR({
-          overlayRoot: $("viewer"),
-          size: Number.isFinite(size) && size > 0 ? size : 1,
-        });
+  $("ar").addEventListener(
+    "click",
+    async () => {
+      try {
+        if (player.state.ar.status !== "inactive") await player.exitAR();
+        else {
+          const size = Number(query.get("arSize"));
+          await player.enterAR({
+            overlayRoot: $("viewer"),
+            size: Number.isFinite(size) && size > 0 ? size : 1,
+          });
+        }
+      } catch (error) {
+        if (error.name !== "AbortError") status(error.message, "error", 6000);
       }
-    } catch (error) {
-      if (error.name !== "AbortError") status(error.message, "error", 6000);
-    }
-  }, options);
-  $("controls").addEventListener("beforexrselect", (event) => event.preventDefault(), options);
+    },
+    options,
+  );
+  $("controls").addEventListener(
+    "beforexrselect",
+    (event) => event.preventDefault(),
+    options,
+  );
 
   for (const id of ["empty", "open-file"])
     $(id).addEventListener("click", () => $("file").click(), options);
@@ -366,8 +477,18 @@ try {
             Math.max(1, player.state.nFrames - 1),
         );
       } else if (event.key.toLowerCase() === "r") player.fitCamera();
-      else if (event.key.toLowerCase() === "f" && player.state.ar.status === "inactive") $("fullscreen").click();
-      else if (event.key.toLowerCase() === "o" && player.state.ar.status === "inactive") $("file").click();
+      else if (event.key.toLowerCase() === "m" && player.state.audio.available)
+        $("mute-toggle").click();
+      else if (
+        event.key.toLowerCase() === "f" &&
+        player.state.ar.status === "inactive"
+      )
+        $("fullscreen").click();
+      else if (
+        event.key.toLowerCase() === "o" &&
+        player.state.ar.status === "inactive"
+      )
+        $("file").click();
       else if (event.key.toLowerCase() === "u") {
         up = up === "y" ? "z" : "y";
         player.setUpAxis(up);

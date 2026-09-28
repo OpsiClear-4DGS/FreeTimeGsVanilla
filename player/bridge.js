@@ -1,4 +1,4 @@
-import { PLAYER_EVENTS } from "./player.js?v=5";
+import { PLAYER_EVENTS } from "./player.js?v=6";
 
 const protocol = "ftgs-player";
 const version = 1;
@@ -62,6 +62,15 @@ export function attachPlayerBridge(player, parentOrigin) {
             break;
           case "seek":
             player.seek(args[0]);
+            break;
+          case "setPlaybackRate":
+            player.setPlaybackRate(args[0]);
+            break;
+          case "setMuted":
+            player.setMuted(args[0]);
+            break;
+          case "setVolume":
+            player.setVolume(args[0]);
             break;
           case "setView":
             player.setView(args[0]);

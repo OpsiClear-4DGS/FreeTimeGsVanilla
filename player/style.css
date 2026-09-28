@@ -17,6 +17,7 @@ body {
   display: none !important;
 }
 button,
+select,
 input {
   font: inherit;
 }
@@ -296,6 +297,42 @@ button:disabled {
 .transport-space {
   flex: 1;
 }
+.audio-controls {
+  display: flex;
+  align-items: center;
+}
+#volume {
+  width: 0;
+  margin: 0;
+  opacity: 0;
+  accent-color: white;
+  transition:
+    width 0.15s,
+    opacity 0.15s;
+}
+.audio-controls:hover #volume,
+.audio-controls:focus-within #volume {
+  width: 60px;
+  margin-inline: 4px;
+  opacity: 1;
+}
+.playback-rate {
+  width: 56px;
+  height: 36px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #f4f4f5;
+  font-size: 12px;
+  cursor: pointer;
+}
+.playback-rate option {
+  background: #191b20;
+}
+.playback-rate:disabled {
+  opacity: 0.3;
+}
 .icon-button {
   position: relative;
   display: grid;
@@ -414,12 +451,23 @@ button:disabled {
     gap: 2px;
   }
   .icon-button {
-    flex-basis: 42px;
-    width: 42px;
+    flex-basis: 36px;
+    width: 36px;
     height: 42px;
+  }
+  #volume {
+    display: none;
   }
   #timecode {
     font-size: 12px;
+  }
+}
+@media (max-width: 460px) {
+  #timecode span {
+    display: none;
+  }
+  .playback-rate {
+    width: 52px;
   }
 }
 @media (max-width: 340px) {

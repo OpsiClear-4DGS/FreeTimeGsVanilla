@@ -15,16 +15,18 @@ export function sortVisible(model, time, view, near = 0.001) {
     min = Infinity,
     max = -Infinity;
   for (let i = 0; i < count; i++) {
-    const o = 4 * i,
-      dt = time - p[o + 3];
-    const opacity = timelineMode === 1
-      ? (time === p[o + 3] ? alpha[i] : 0)
-      : timelineMode === 2 ? alpha[i] : Math.max(
-        opacityFloor,
-        alpha[i] * Math.exp(-0.5 * (dt / v[o + 3]) ** 2),
-      );
-    if (opacity < 1 / 255) continue; // Same negligible-alpha cutoff as the splat rasterizer.
-    const motion = useVelocity && timelineMode === 0 ? dt : 0;
+    const o = 4 * i;
+    if (timelineMode === 1 && time !== p[o + 3]) continue;
+    const dt = timelineMode === 0 ? time - p[o + 3] : 0;
+    const opacity =
+      timelineMode === 0
+        ? Math.max(
+            opacityFloor,
+            alpha[i] * Math.exp(-0.5 * (dt / v[o + 3]) ** 2),
+          )
+        : alpha[i];
+    if (opacity < 1 / 255) continue; // Same cutoff as the splat rasterizer.
+    const motion = useVelocity ? dt : 0;
     const x = p[o] + v[o] * motion,
       y = p[o + 1] + v[o + 1] * motion,
       z = p[o + 2] + v[o + 2] * motion;

@@ -104,7 +104,7 @@ def main():
             }""")
             print("Exact WebP byte checks and source-attribute comparisons:", result)
             page.evaluate("""async () => {
-              const {FTGSPlayer} = await import('./player.js?v=5');
+              const {FTGSPlayer} = await import('./player.js?v=6');
               const canvas = document.createElement('canvas'); canvas.id = 'test-canvas';
               canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:10';
               document.body.append(canvas);

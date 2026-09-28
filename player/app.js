@@ -1,7 +1,9 @@
 import { FTGSPlayer } from "./player.js";
 import { attachPlayerBridge } from "./bridge.js";
 import { demoFile } from "./demo.js";
+import { mountPlayerShell } from "./shell.js";
 
+mountPlayerShell(document.getElementById("viewer"));
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 const fps = [24, 30, 60].includes(Number(query.get("fps")))
@@ -22,9 +24,34 @@ let player, detachBridge, idleTimer, messageTimer;
 let up = query.get("up") === "z" ? "z" : "y";
 
 const clock = (seconds) => {
-  const tenths = Math.round(seconds * 10);
-  return `${Math.floor(tenths / 600)}:${((tenths % 600) / 10).toFixed(1).padStart(4, "0")}`;
+  const total = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(total / 60);
+  const tail = String(total % 60).padStart(2, "0");
+  return minutes < 60
+    ? `${minutes}:${tail}`
+    : `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}:${tail}`;
 };
+function previewTime(fraction) {
+  if ($("timeline").disabled) return;
+  const time = Math.max(0, Math.min(1, fraction));
+  const width = $("timeline").getBoundingClientRect().width;
+  $("timeline-area").style.setProperty(
+    "--preview",
+    `${Math.max(24, Math.min(width - 24, time * width))}px`,
+  );
+  $("timeline-area").dataset.preview = "true";
+  $("seek-preview").textContent = clock(time * player.duration);
+}
+function updateFullscreen() {
+  const fullscreen = Boolean(document.fullscreenElement);
+  const label = fullscreen ? "Exit fullscreen" : "Fullscreen";
+  $("fullscreen").setAttribute("aria-label", label);
+  $("fullscreen").dataset.tooltip = `${label} (F)`;
+  $("fullscreen-icon").setAttribute(
+    "href",
+    fullscreen ? "#collapse" : "#expand",
+  );
+}
 function wakeControls() {
   clearTimeout(idleTimer);
   $("viewer").classList.remove("idle");
@@ -63,6 +90,9 @@ function updatePlaying() {
     player.playing ? "Pause" : "Play",
   );
   $("play-icon").setAttribute("href", player.playing ? "#pause" : "#play");
+  $("play-toggle").dataset.tooltip = player.playing
+    ? "Pause (Space)"
+    : "Play (Space)";
   wakeControls();
 }
 async function load(input, loadOptions) {
@@ -92,13 +122,19 @@ try {
       Number.isSafeInteger(requestedFrames) && requestedFrames > 0
         ? requestedFrames
         : null,
-    autoplay: query.get("autoplay") !== "0",
+    autoplay:
+      query.get("autoplay") !== "0" && $("viewer").dataset.autoplay !== "false",
     loop: query.get("loop") !== "0",
   });
   player.addEventListener(
     "loadstart",
     () => {
       $("empty").hidden = true;
+      $("play-toggle").disabled =
+        $("timeline").disabled =
+        $("reset-view").disabled =
+          true;
+      delete $("timeline-area").dataset.preview;
       status("Opening…", "loading");
     },
     options,
@@ -122,6 +158,7 @@ try {
       $("controls").hidden = !showControls;
       $("play-toggle").disabled = detail.nFrames === 1;
       $("timeline").disabled = detail.nFrames === 1;
+      $("reset-view").disabled = false;
       updateTime(detail);
       updatePlaying();
       status(
@@ -138,6 +175,9 @@ try {
     "error",
     ({ detail }) => {
       $("controls").hidden = !showControls;
+      $("play-toggle").disabled = $("timeline").disabled =
+        !detail.loaded || detail.nFrames === 1;
+      $("reset-view").disabled = !detail.loaded;
       status(detail.error, "error");
     },
     options,
@@ -146,6 +186,9 @@ try {
     "abort",
     ({ detail }) => {
       $("empty").hidden = detail.loaded;
+      $("play-toggle").disabled = $("timeline").disabled =
+        !detail.loaded || detail.nFrames === 1;
+      $("reset-view").disabled = !detail.loaded;
       status("", detail.status);
     },
     options,
@@ -183,9 +226,51 @@ try {
     () => {
       player.pause();
       player.seek(Number($("timeline").value));
+      if (
+        document.activeElement === $("timeline") ||
+        $("timeline").matches(":hover")
+      )
+        previewTime(player.time);
     },
     options,
   );
+  $("timeline").addEventListener(
+    "pointermove",
+    (event) => {
+      const bounds = $("timeline").getBoundingClientRect();
+      previewTime((event.clientX - bounds.left) / bounds.width);
+    },
+    options,
+  );
+  $("timeline").addEventListener(
+    "pointerleave",
+    () => {
+      delete $("timeline-area").dataset.preview;
+    },
+    options,
+  );
+  $("timeline").addEventListener(
+    "pointerup",
+    (event) => {
+      if (event.pointerType !== "mouse")
+        delete $("timeline-area").dataset.preview;
+    },
+    options,
+  );
+  $("timeline").addEventListener(
+    "focus",
+    () => previewTime(player.time),
+    options,
+  );
+  $("timeline").addEventListener(
+    "blur",
+    () => {
+      delete $("timeline-area").dataset.preview;
+    },
+    options,
+  );
+  $("reset-view").addEventListener("click", () => player.fitCamera(), options);
+  document.addEventListener("fullscreenchange", updateFullscreen, options);
   $("fullscreen").addEventListener(
     "click",
     async () => {
@@ -292,7 +377,7 @@ try {
     void load(url, {
       view: query.has("view") ? JSON.parse(query.get("view")) : null,
     });
-  else if (query.get("demo") === "1")
+  else if (query.get("demo") === "1" || $("viewer").dataset.demo === "true")
     void load(demoFile(), { name: "Kinetic ribbon" });
 } catch (error) {
   teardown();

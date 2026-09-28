@@ -2,160 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Embedding an FTGS player</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="dark" />
+    <title>FTGS Player</title>
     <link rel="icon" href="data:," />
-    <style>
-      :root {
-        font:
-          15px system-ui,
-          sans-serif;
-        color-scheme: dark;
-        background: #111;
-        color: #eee;
-      }
-      body {
-        max-width: 960px;
-        margin: 32px auto;
-        padding: 0 16px;
-      }
-      a {
-        color: #b8d8ff;
-      }
-      canvas,
-      iframe {
-        display: block;
-        width: 100%;
-        height: min(60vh, 540px);
-        border: 0;
-        background: #070a0c;
-        touch-action: none;
-      }
-      .controls {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        margin: 16px 0;
-        flex-wrap: wrap;
-      }
-      #timeline {
-        flex: 1;
-        min-width: 160px;
-      }
-      button,
-      input {
-        font: inherit;
-      }
-      #message {
-        min-height: 1.5em;
-      }
-    </style>
+    <link rel="stylesheet" href="../style.css?v=2" />
   </head>
   <body>
-    <p>
-      <a href="./embedding.html">Canvas API</a> ·
-      <a href="?mode=iframe">Iframe API</a>
-    </p>
-    <div id="mount"></div>
-    <div class="controls">
-      <button id="play" disabled>Play</button>
-      <input
-        id="timeline"
-        type="range"
-        min="0"
-        max="1"
-        step="0.001"
-        value="0"
-        aria-label="Timeline"
-        disabled
-      />
-      <label>Open <input id="file" type="file" accept=".ply" /></label>
-    </div>
-    <p id="message" role="status">Loading generated demo…</p>
-    <script type="module">
-      import { FTGSPlayer } from "../player.js";
-      import { FTGSEmbed } from "../embed.js";
-      import { demoFile } from "../demo.js";
-
-      const iframe =
-        new URLSearchParams(location.search).get("mode") === "iframe";
-      const surface = document.createElement(iframe ? "iframe" : "canvas");
-      surface.setAttribute("aria-label", "Animated FTGS scene");
-      surface.tabIndex = 0;
-      if (iframe) {
-        surface.title = "FTGS player";
-        surface.allowFullscreen = true;
-      }
-      document.querySelector("#mount").append(surface);
-      const message = document.querySelector("#message");
-      const play = document.querySelector("#play");
-      const timeline = document.querySelector("#timeline");
-      let player;
-      const report = (error) => {
-        if (error.name !== "AbortError") message.textContent = error.message;
-      };
-      const update = ({ detail }) => {
-        play.textContent = detail.playing ? "Pause" : "Play";
-        play.disabled = timeline.disabled =
-          !detail.loaded || detail.status === "loading";
-        timeline.value = detail.time;
-      };
-      try {
-        player = iframe
-          ? new FTGSEmbed(surface, {
-              src: new URL("../?controls=0&autoplay=0", import.meta.url).href,
-            })
-          : new FTGSPlayer(surface, { autoplay: false });
-        for (const event of [
-          "loaded",
-          "play",
-          "pause",
-          "timeupdate",
-          "loadstart",
-        ])
-          player.addEventListener(event, update);
-        player.addEventListener("error", ({ detail }) => {
-          message.textContent = detail.error;
-        });
-        player.addEventListener("loaded", () => {
-          message.textContent = "";
-        });
-        play.onclick = async () => {
-          try {
-            if (player.state.playing) await player.pause();
-            else await player.play();
-          } catch (error) {
-            report(error);
-          }
-        };
-        timeline.oninput = async () => {
-          const time = Number(timeline.value);
-          try {
-            await player.pause();
-            await player.seek(time);
-          } catch (error) {
-            report(error);
-          }
-        };
-        document.querySelector("#file").onchange = async (event) => {
-          const file = event.target.files[0];
-          event.target.value = "";
-          if (file) {
-            try {
-              await player.load(file);
-            } catch (error) {
-              report(error);
-            }
-          }
-        };
-        if (iframe) await player.ready;
-        await player.load(demoFile(), { name: "Generated demo" });
-      } catch (error) {
-        report(error);
-      }
-      addEventListener("pagehide", (event) => {
-        if (!event.persisted) player?.destroy();
-      });
-    </script>
+    <main
+      id="viewer"
+      data-state="empty"
+      data-demo="true"
+      data-autoplay="false"
+      aria-label="FTGS player"
+    ></main>
+    <script type="module" src="./embedding.js?v=2"></script>
   </body>
 </html>

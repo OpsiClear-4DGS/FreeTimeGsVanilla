@@ -263,14 +263,20 @@ def main():
             print("PASS: cross-origin iframe API, host-relative URLs with CORS, events, origin/source checks, resize, failure/reconnect/cleanup", flush=True)
             for mode in ["canvas", "iframe"]:
                 page.goto(host + prefix + "examples/embedding.html?mode=" + mode)
-                page.wait_for_function("!document.querySelector('#play').disabled")
-                page.locator("#play").click()
-                page.wait_for_function("Number(document.querySelector('#timeline').value) > .03")
-                page.locator("#play").click()
-                page.locator("#timeline").evaluate("el => { el.value = .5; el.dispatchEvent(new Event('input')); }")
-                page.wait_for_function("Number(document.querySelector('#timeline').value) === .5")
-                assert page.title() == "Embedding an FTGS player"
-                assert page.locator("#message").inner_text() == ""
+                if mode == "iframe":
+                    page.wait_for_function("document.querySelector('iframe')?.contentWindow !== null")
+                    page.frame_locator("iframe").locator('#viewer[data-loaded="true"]').wait_for()
+                    view = page.frames[1]
+                else:
+                    page.locator('#viewer[data-loaded="true"]').wait_for()
+                    view = page
+                view.locator("#play-toggle").click()
+                view.wait_for_function("Number(document.querySelector('#timeline').value) > .03")
+                view.locator("#play-toggle").click()
+                view.locator("#timeline").evaluate("el => { el.value = .5; el.dispatchEvent(new Event('input')); }")
+                view.wait_for_function("Number(document.querySelector('#timeline').value) === .5")
+                assert page.title().endswith("FTGS Player")
+                assert view.locator("#message").inner_text() == ""
             assert not errors, errors
             print("PASS: runnable canvas and iframe documentation examples", flush=True)
             browser.close()

@@ -2,82 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="A minimal player for animated FreeTimeGS .ftgs.ply files. Drop a file to play it locally in your browser."
+    />
     <title>FTGS Player</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="./style.css" />
+    <link rel="stylesheet" href="./style.css?v=2" />
   </head>
   <body>
-    <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <defs>
-        <symbol id="play" viewBox="0 0 24 24">
-          <path d="m8 5 11 7-11 7Z" />
-        </symbol>
-        <symbol id="pause" viewBox="0 0 24 24">
-          <path d="M8 5v14M16 5v14" />
-        </symbol>
-        <symbol id="open" viewBox="0 0 24 24">
-          <path d="M3 8V5h7l2 3h9l-3 12H3V8Z" />
-        </symbol>
-        <symbol id="expand" viewBox="0 0 24 24">
-          <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
-        </symbol>
-      </defs>
-    </svg>
-    <main id="viewer" data-state="empty" aria-label="FTGS player">
-      <canvas
-        id="canvas"
-        tabindex="0"
-        aria-label="3D scene. Drag to orbit, Shift-drag to pan, scroll to zoom."
-      ></canvas>
-      <button id="empty" class="empty" aria-label="Choose a .ftgs.ply file">
-        <span>Drop a .ftgs.ply here</span>
-        <small>or click to open</small>
-      </button>
-      <input
-        id="file"
-        type="file"
-        accept=".ply"
-        hidden
-        aria-label="Open FTGS file"
-      />
-      <div id="message" class="message" role="status" hidden></div>
-      <div id="drop-hint" class="drop-hint" hidden>Drop to play</div>
-      <div
-        id="controls"
-        class="controls"
-        role="group"
-        aria-label="Playback controls"
-        hidden
-      >
-        <button
-          id="play-toggle"
-          title="Play / pause (Space)"
-          aria-label="Play"
-          disabled
-        >
-          <svg aria-hidden="true"><use id="play-icon" href="#play" /></svg>
-        </button>
-        <input
-          id="timeline"
-          type="range"
-          min="0"
-          max="1"
-          step="0.0001"
-          value="0"
-          aria-label="Timeline"
-          disabled
-        />
-        <output id="timecode">0:00.0 <span>/ 0:00.0</span></output>
-        <button id="open-file" title="Open file (O)" aria-label="Open file">
-          <svg aria-hidden="true"><use href="#open" /></svg>
-        </button>
-        <button id="fullscreen" title="Fullscreen (F)" aria-label="Fullscreen">
-          <svg aria-hidden="true"><use href="#expand" /></svg>
-        </button>
-      </div>
-    </main>
-    <script type="module" src="./app.js"></script>
+    <main id="viewer" data-state="empty" aria-label="FTGS player"></main>
+    <script type="module" src="./app.js?v=2"></script>
   </body>
 </html>

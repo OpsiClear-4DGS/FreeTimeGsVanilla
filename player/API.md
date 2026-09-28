@@ -6,6 +6,10 @@ events, and cleanup. Neither needs a runtime package or a build step.
 
 Runnable examples: [canvas](examples/embedding.html) ·
 [iframe](examples/embedding.html?mode=iframe). Both use generated demo data.
+The examples use the same minimal player controls as the standalone page. The
+canvas example binds the canvas API through `app.js`; the iframe example's
+[source](examples/embedding.js) loads the model through the iframe API and uses
+the child player's built-in controls.
 
 ## Canvas API
 

@@ -182,6 +182,7 @@ from freetime_ops import (
     validate_vanilla_checkpoint,
 )
 from video_io import MP4Writer
+from export_ftgs_ply import export_checkpoint, save_ftgs_ply
 
 
 # ============================================================
@@ -549,17 +550,19 @@ class Config:
     # ==================== PLY Export ====================
     export_ply: bool = False  # Disabled by default (slow and large files)
     """Export PLY sequence at end of training. One PLY per frame with
-    positions and opacities computed for that specific time point."""
+    positions and opacities computed for that specific time point, or one
+    complete animated model when export_ply_format='ftgs'."""
 
     export_ply_steps: Optional[List[int]] = None
     """Steps at which to export PLY sequences. If None, uses save_steps.
     Set to [30000] to only export PLY at the final step (saves disk space)."""
 
-    export_ply_format: Literal["ply", "splat", "ply_compressed"] = "ply"
+    export_ply_format: Literal["ply", "splat", "ply_compressed", "ftgs"] = "ply"
     """PLY export format:
     - 'ply': Standard PLY format (supported by most viewers)
     - 'splat': Custom format for antimatter15 viewer
-    - 'ply_compressed': Compressed format for Supersplat viewer"""
+    - 'ply_compressed': Compressed format for Supersplat viewer
+    - 'ftgs': One .ftgs.ply with all Vanilla spatial, SH and temporal parameters"""
 
     export_ply_opacity_threshold: float = 0.01
     """Only export Gaussians with combined opacity (base × temporal) above this threshold.
@@ -605,7 +608,8 @@ class Config:
 
     export_only: bool = False
     """If True and ckpt_path is provided, load checkpoint and export PLY/videos
-    without training. Useful for generating outputs from a trained model."""
+    without training. With format='ftgs', export just the model on CPU without
+    loading the dataset or rendering videos."""
 
     def adjust_steps(self, factor: float):
         """Scale training steps by factor."""
@@ -2285,7 +2289,7 @@ class FreeTime4DRunner:
         """
         Export PLY files for each frame from start_frame to end_frame.
 
-        Two modes:
+        With format='ftgs', write one complete animated model. Otherwise:
         1. Compact mode (export_ply_compact=True): Saves ~15x less disk space
            - One canonical_4d.ply with all static params + motion parameters
            - Per-frame .npz files with only positions and opacities (16 bytes/Gaussian)
@@ -2295,7 +2299,13 @@ class FreeTime4DRunner:
         """
         cfg = self.cfg
 
-        if cfg.export_ply_compact:
+        if cfg.export_ply_format == "ftgs":
+            path = save_ftgs_ply(
+                os.path.join(cfg.result_dir, f"ckpt_{step}.ftgs.ply"), self.splats,
+                use_velocity=cfg.use_velocity, n_frames=cfg.end_frame - cfg.start_frame,
+            )
+            print(f"[FTGS Export] Saved {len(self.splats['means']):,} Gaussians to {path}")
+        elif cfg.export_ply_compact:
             self._export_ply_compact(step)
         else:
             self._export_ply_full(step)
@@ -2561,6 +2571,14 @@ class FreeTime4DRunner:
 
 
 def main(local_rank: int, world_rank: int, world_size: int, cfg: Config):
+    if cfg.export_only and cfg.export_ply_format == "ftgs":
+        if cfg.ckpt_path is None:
+            raise ValueError("--ckpt-path is required for FTGS export-only mode")
+        if world_rank == 0:
+            name = os.path.splitext(os.path.basename(cfg.ckpt_path))[0] + ".ftgs.ply"
+            export_checkpoint(cfg.ckpt_path, os.path.join(cfg.result_dir, name))
+        return
+
     if world_size > 1 and not cfg.disable_viewer:
         cfg.disable_viewer = True
         if world_rank == 0:
@@ -2709,4 +2727,7 @@ if __name__ == "__main__":
     cfg = tyro.extras.overridable_config_cli(configs)
     cfg.adjust_steps(cfg.steps_scaler)
 
-    cli(main, cfg, verbose=True)
+    if cfg.export_only and cfg.export_ply_format == "ftgs":
+        main(0, 0, 1, cfg)
+    else:
+        cli(main, cfg, verbose=True)

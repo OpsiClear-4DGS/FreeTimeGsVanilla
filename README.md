@@ -257,6 +257,81 @@ CUDA_VISIBLE_DEVICES=0 python src/simple_trainer_freetime_4d_pure_relocation.py 
 
 ## Outputs
 
+### Single-file FTGS export
+
+Export a trained Vanilla checkpoint to one `.ftgs.ply` on CPU, without the
+dataset or a GPU:
+
+```bash
+python src/export_ftgs_ply.py \
+    --ckpt /path/to/results/ckpts/ckpt_29999.pt \
+    --output /path/to/scene.ftgs.ply
+```
+
+Omitting `--output` saves next to the checkpoint with the `.ftgs.ply` suffix.
+For older checkpoints, `--n-frames 61` supplies frame-count metadata and
+`--no-velocity` records a model trained with motion disabled. Otherwise these
+settings come from the checkpoint; legacy models default to motion enabled and
+omit the frame count when it is unknown.
+
+The trainer accepts `--export-ply --export-ply-format ftgs` to save
+`result_dir/ckpt_<step>.ftgs.ply` at the existing PLY export steps. To export an
+existing checkpoint through the trainer CLI:
+
+```bash
+python src/simple_trainer_freetime_4d_pure_relocation.py default_keyframe \
+    --export-only --export-ply-format ftgs \
+    --ckpt-path /path/to/results/ckpts/ckpt_29999.pt \
+    --result-dir /path/to/export
+```
+
+This mode exports only the complete model and reads frame count and motion
+settings from the checkpoint. It bypasses dataset loading, GPU initialization,
+and video rendering. FTGS export keeps every Gaussian and SH coefficient;
+the per-frame opacity threshold, frame stride, and compact-export setting do
+not filter this file.
+
+### FTGS PLY layout, version 1
+
+This is this repository's documented format for Vanilla FreeTimeGS. It is a
+binary little-endian PLY with one `vertex` per Gaussian; every property is a
+32-bit float. Spatial coordinates remain in the trainer's model space.
+
+| Properties | Stored values |
+| --- | --- |
+| `x`, `y`, `z` | Canonical position at that Gaussian's `time` |
+| `nx`, `ny`, `nz` | Zeros, following the usual 3DGS PLY layout |
+| `f_dc_0..2` | RGB DC spherical harmonic coefficients |
+| `f_rest_0..` | Remaining SH coefficients, all red coefficients then green then blue |
+| `opacity` | Base opacity logit; apply sigmoid |
+| `scale_0..2` | Spatial log-scales; apply exp |
+| `rot_0..3` | Quaternion in wxyz order; normalize when rendering |
+| `time` | Canonical time on the normalized sequence timeline |
+| `log_duration` | Log temporal standard deviation; apply exp |
+| `velocity_0..2` | Displacement per unit of normalized time |
+
+Header comments record `ftgs_version 1`, `time_units normalized`, `sh_degree`,
+`use_velocity` (0 or 1), `min_duration 0.02`, `opacity_floor 0.0001`, and
+`n_frames` when known. `log_duration` includes Vanilla's minimum-duration
+projection. Raw velocity values are retained even when `use_velocity` is 0.
+
+For a time `t`, an importer reconstructs the model using:
+
+```text
+dt = t - time
+position = [x, y, z] + [velocity_0, velocity_1, velocity_2] * dt
+           # use [x, y, z] directly when use_velocity is 0
+alpha = max(sigmoid(opacity) * exp(-0.5 * (dt / exp(log_duration))**2), 0.0001)
+```
+
+The sequence spans `t=0..1`; Gaussian canonical times may lie outside that
+interval. Relative frame `i` maps to `i / max(n_frames - 1, 1)`. This file stores
+rendering parameters, not optimizer state. Animated playback requires a reader
+that implements these temporal fields; the bundled viewer still loads `.pt`
+checkpoints.
+
+### Existing training outputs
+
 After training, you'll find:
 
 ```

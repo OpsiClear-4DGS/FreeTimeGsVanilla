@@ -9,7 +9,7 @@ import {
   MAX_AUDIO_BYTES,
   isPackagePath,
   resolvePlayback,
-} from "./playback.js?v=8";
+} from "./playback.js?v=9";
 
 export const TSOG_PROFILE = Object.freeze({
   id: "org.opsiclear.tsog-playback",

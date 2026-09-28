@@ -1,9 +1,9 @@
 // Container validation needs only Node.js 22+ or a modern browser.
 // Supply decodeImage for exhaustive attribute checks; audio codecs are not decoded.
 import { openZip } from "./zip.js?v=8";
-import { readTSOGMetadata, validateTSOGMetadata, decodeTSOG } from "./tsog.js?v=8";
+import { readTSOGMetadata, validateTSOGMetadata, decodeTSOG } from "./tsog.js?v=9";
 import { inspectAttributeImage } from "./webp.js?v=7";
-import { MAX_AUDIO_BYTES } from "./playback.js?v=8";
+import { MAX_AUDIO_BYTES } from "./playback.js?v=9";
 
 export async function validateTSOGPackage(blob, { signal, requireProfile = false, decodeImage } = {}) {
   const archive = await openZip(blob, signal);

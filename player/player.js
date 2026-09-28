@@ -1,4 +1,4 @@
-import { readModel } from "./model.js?v=8";
+import { readModel } from "./model.js?v=9";
 import { OrbitCamera, validateCameraView } from "./camera.js?v=4";
 import { SplatRenderer } from "./renderer.js?v=6";
 import { ARPresentation, isARSupported } from "./xr.js?v=4";
@@ -7,7 +7,7 @@ import {
   resolvePlayback,
   validatePlaybackRate,
   validateVolume,
-} from "./playback.js?v=8";
+} from "./playback.js?v=9";
 
 export const PLAYER_EVENTS = Object.freeze([
   "loadstart",

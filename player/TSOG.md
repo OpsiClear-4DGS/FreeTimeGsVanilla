@@ -1,4 +1,8 @@
-# Packaged TSOG support
+# Packaged TSOG guide
+
+**Format implementers:** use [TSOG Playback Profile 1](TSOG-SPEC.md), the normative
+specification, [JSON Schema](tsog.schema.json), and
+[conformance corpus](tests/fixtures/tsog/CONFORMANCE.md). This guide covers usage.
 
 Drop one `.tsog` file into the player, choose it with the file button, or use
 `?src=path/to/scene.tsog`. Both embedding APIs accept the same file through
@@ -49,13 +53,16 @@ repository license.
 
 ## Audio and playback metadata
 
-This player adds two **optional root fields** to `meta.json`. These are local
-player extensions, not fields defined by the original TSOG exporter or SOG
-specification. The package still uses TSOG version 4, and its Gaussian images
-are unchanged. Files without these fields retain the defaults described below.
+This player adds two **optional root fields** to `meta.json`, defined by
+[TSOG Playback Profile 1](TSOG-SPEC.md). These are this repository's additions,
+not fields defined by the original TSOG exporter or SOG specification. New
+packages include the profile declaration below. The base version remains 4 and
+Gaussian images are unchanged. Legacy files without a declaration remain
+readable; files without playback/audio fields retain the defaults below.
 
 ```json
 {
+  "profile": { "id": "org.opsiclear.tsog-playback", "version": 1 },
   "playback": { "duration": 10, "fps": 30, "rate": 1, "loop": true },
   "audio": { "file": "audio/track.mp3", "mimeType": "audio/mpeg", "volume": 0.8 }
 }
@@ -141,6 +148,8 @@ Use `--no-loop` for a clip that stops at its end. Unspecified defaults and other
 metadata are retained; the tool copies the attribute images without encoding
 them again. Output must end in `.tsog`; existing output files are never
 overwritten. Run `--help` for the options. Use a new output filename for changes.
+Every output declares profile version 1. An unsupported profile ID or version
+is rejected instead of silently downgrading it.
 
 | Flag | Effect |
 | --- | --- |
@@ -214,6 +223,23 @@ options. Both canvas and iframe APIs expose `setPlaybackRate`, `setMuted`, and
 | A static scene with audio is rejected | Set a positive `playback.duration` with `--duration`. |
 | Discrete timing is rejected | Ensure `playback.duration * playback.fps` equals `timeline.N`, including any values retained from the input file. |
 | Packaging reports that output exists | Choose a new output path; the command never overwrites an existing file. |
+
+## Validate a package
+
+From the player directory, with Node.js 22+:
+
+```bash
+node tools/validate-tsog.mjs scene.tsog --require-profile
+node tools/validate-tsog.mjs scene.tsog --json
+```
+
+Omit `--require-profile` to accept legacy v4 packages without a declaration.
+The command checks metadata, derived timing, referenced ZIP entries and
+checksums, lossless WebP headers/dimensions, and audio presence/size. It reports
+its scope as `container`: it does not decode image pixels or audio codecs.
+Exit status is 0 on success and 1 on failure. For exhaustive attribute checks,
+use the browser validation API and synthetic examples in the
+[specification](TSOG-SPEC.md#10-validation-and-conformance-examples).
 
 ## Compatibility
 

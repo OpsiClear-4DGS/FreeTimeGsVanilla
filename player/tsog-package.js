@@ -1,7 +1,7 @@
 // Repackage existing attributes without decoding or recompressing their images.
 import { openZip, crc32 } from "./zip.js?v=6";
-import { validateTSOGMetadata } from "./tsog.js?v=6";
-import { audioMimeType, MAX_AUDIO_BYTES } from "./playback.js?v=6";
+import { validateTSOGMetadata, readTSOGMetadata, TSOG_PROFILE } from "./tsog.js?v=7";
+import { audioMimeType, MAX_AUDIO_BYTES } from "./playback.js?v=7";
 
 function storedZip(entries) {
   const body = [],
@@ -45,6 +45,8 @@ function storedZip(entries) {
   }
   if (offset + directorySize >= 0xffffffff)
     throw new Error("The package exceeds ZIP32 limits.");
+  if (directorySize > 4 * 1024 * 1024)
+    throw new Error("The package central directory exceeds 4 MiB.");
   const footer = new Uint8Array(22),
     end = new DataView(footer.buffer);
   end.setUint32(0, 0x06054b50, true);
@@ -61,13 +63,8 @@ export async function packageTSOG(
   { audio, playback, volume, signal } = {},
 ) {
   const archive = await openZip(input, signal);
-  const meta = validateTSOGMetadata(
-    JSON.parse(
-      new TextDecoder().decode(
-        await archive.read("meta.json", 4 * 1024 * 1024),
-      ),
-    ),
-  );
+  const meta = await readTSOGMetadata(archive);
+  meta.profile = { ...meta.profile, ...TSOG_PROFILE };
   const oldAudio = meta.audio?.file;
   if (playback !== undefined) {
     if (!playback || typeof playback !== "object" || Array.isArray(playback))
@@ -92,11 +89,11 @@ export async function packageTSOG(
     meta.audio.volume = volume;
   }
   validateTSOGMetadata(meta);
+  const metadata = new TextEncoder().encode(JSON.stringify(meta, null, 2) + "\n");
+  if (metadata.length > 4 * 1024 * 1024)
+    throw new Error("The package metadata exceeds 4 MiB.");
   const entries = [
-    [
-      "meta.json",
-      new TextEncoder().encode(JSON.stringify(meta, null, 2) + "\n"),
-    ],
+    ["meta.json", metadata],
   ];
   for (const name of archive.names) {
     if (name === "meta.json" || (audio !== undefined && name === oldAudio))
@@ -108,6 +105,12 @@ export async function packageTSOG(
   }
   if (audio instanceof Blob)
     entries.push([meta.audio.file, new Uint8Array(await audio.arrayBuffer())]);
+  const contents = new Map(entries);
+  const referenced = [meta.means, meta.scales, meta.quats, meta.sh0, meta.shN,
+    meta.timeline, meta.temporal?.means].filter(Boolean).flatMap((group) => group.files);
+  if (meta.audio) referenced.push(meta.audio.file);
+  for (const name of referenced)
+    if (!contents.get(name)?.length) throw new Error(`Missing or empty package entry '${name}'.`);
   signal?.throwIfAborted();
   return storedZip(entries);
 }

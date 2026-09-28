@@ -52,6 +52,20 @@ The default volume and playback rate can also be overridden through the
 [embedding API](API.md#programmatic-audio-and-speed). Existing files without
 these optional fields keep their previous behavior; `.ftgs.ply` stores no audio.
 
+For an independent reader/writer, use the versioned
+[TSOG Playback Profile 1 specification](TSOG-SPEC.md),
+[metadata schema](tsog.schema.json), and
+[synthetic conformance examples](tests/fixtures/tsog/CONFORMANCE.md).
+New packages declare profile version 1; legacy v4 files remain supported.
+Validate metadata and the container from the repository root with Node.js 22+:
+
+```bash
+node player/tools/validate-tsog.mjs scene.tsog --require-profile
+```
+
+Omit `--require-profile` for a legacy file. Pixel decoding and audio codec
+support need the additional checks described in the specification.
+
 ## Embed in another project
 
 The [embedding API](API.md) provides `FTGSPlayer` for your own canvas and

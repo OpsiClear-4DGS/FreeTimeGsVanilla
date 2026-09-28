@@ -340,5 +340,13 @@ Copy `tsog-package.js` as well if your application will package audio or save
 playback metadata. It uses the shared TSOG and ZIP modules; the Node CLI in
 `tools/` is only needed for command-line packaging.
 
+Packages declare [TSOG Playback Profile 1](TSOG-SPEC.md); older v4 packages are
+still readable. Copy `tsog-validate.js` for the optional `validateTSOGPackage()`
+API. It validates metadata and container contents by default; supplying an
+image-decoder callback enables checks of every decoded Gaussian. The
+[specification](TSOG-SPEC.md#10-validation-and-conformance-examples) documents
+the report and complete browser example. The schema and validator add no
+runtime dependency to normal playback.
+
 When redistributing the player modules, include the repository license and
 [THIRD_PARTY.md](THIRD_PARTY.md), which preserves TSOG and PlayCanvas notices.

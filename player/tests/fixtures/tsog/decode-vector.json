@@ -1,0 +1,40 @@
+{
+  "description": "Two analytic synthetic Gaussians. The third motion axis spans [0,65535], so low/high byte pairs [1,2] and [2,1] decode to 513 and 258. Images are raw RGBA for testing independently of WebP.",
+  "tolerance": 0.000001,
+  "meta": {
+    "version": 4,
+    "profile": {"id":"org.opsiclear.tsog-playback","version":1},
+    "count": 2,
+    "means": {"mins":[-0.6931471805599453,0,0.6931471805599453],"maxs":[0.6931471805599453,0,0.6931471805599453],"files":["pl","ph"]},
+    "scales": {"codebook":[0],"files":["s"]},
+    "quats": {"files":["q"]},
+    "sh0": {"codebook":[0,1,-1],"files":["dc"]},
+    "shN": {"bands":1,"count":1,"codebook":[0,0.5,-0.5],"files":["palette","labels"]},
+    "timeline": {"type":1,"mins":[-1,0.5],"maxs":[1,0.5],"files":["tl","th"]},
+    "temporal": {"means":{"mins":[[-2,0,0]],"maxs":[[2,0,65535]],"files":["vl","vh"]}},
+    "playback": {"duration":2,"fps":2,"rate":2,"loop":false}
+  },
+  "images": {
+    "pl": {"width":2,"height":1,"pixels":[[0,0,0,255],[255,0,0,255]]},
+    "ph": {"width":2,"height":1,"pixels":[[0,0,0,255],[255,0,0,255]]},
+    "s": {"width":2,"height":1,"fill":[0,0,0,255]},
+    "q": {"width":2,"height":1,"pixels":[[128,128,128,252],[128,128,128,255]]},
+    "dc": {"width":2,"height":1,"pixels":[[0,1,2,128],[2,0,1,255]]},
+    "palette": {"width":192,"height":1,"fill":[1,2,0,255]},
+    "labels": {"width":2,"height":1,"fill":[0,0,0,255]},
+    "tl": {"width":2,"height":1,"pixels":[[0,0,0,255],[255,0,0,255]]},
+    "th": {"width":2,"height":1,"pixels":[[0,0,0,255],[255,0,0,255]]},
+    "vl": {"width":2,"height":1,"pixels":[[0,0,1,255],[255,0,2,255]]},
+    "vh": {"width":2,"height":1,"pixels":[[0,0,2,255],[255,0,1,255]]}
+  },
+  "expected": {
+    "positionTime": [-1,0,1,-1,1,0,1,1],
+    "velocityDuration": [-2,0,513,0.5,2,0,258,0.5],
+    "covarianceA": [1,0,0,1,1,0,0,1],
+    "alpha": [0.5019607843137255,1],
+    "sh": [0,1,-1,0,0.5,-0.5,0,0,0.5,-0.5,0,0,0.5,-0.5,0,0,-1,0,1,0,0.5,-0.5,0,0,0.5,-0.5,0,0,0.5,-0.5,0,0],
+    "positionsAtTimeZero": [-3,0,514,-1,0,-257],
+    "opacityAtTimeZero": [0.0679330049187703,0.1353352832366127],
+    "playback": {"nFrames":5,"fps":2,"duration":2,"playbackRate":2,"loop":false,"playable":true}
+  }
+}

@@ -2,24 +2,34 @@
 // Paper, original repository, compatibility notes and licenses: TSOG.md and THIRD_PARTY.md.
 import { boundsForModel, covarianceFromQuaternion } from "./ftgs.js?v=6";
 import { openZip } from "./zip.js?v=6";
-import { AttributeImages } from "./webp.js?v=6";
+import { AttributeImages } from "./webp.js?v=7";
 import {
   validatePlaybackMetadata,
   audioMimeType,
   MAX_AUDIO_BYTES,
-} from "./playback.js?v=6";
+  isPackagePath,
+  resolvePlayback,
+} from "./playback.js?v=7";
+
+export const TSOG_PROFILE = Object.freeze({
+  id: "org.opsiclear.tsog-playback",
+  version: 1,
+});
 
 const invalid = (message) => {
   throw new Error(`Invalid TSOG: ${message}`);
 };
 const positiveInteger = (value, max = Number.MAX_SAFE_INTEGER) =>
   Number.isSafeInteger(value) && value > 0 && value <= max;
+const object = (value) => value && typeof value === "object" && !Array.isArray(value);
+const float32 = (value) => typeof value === "number" && Number.isFinite(value) &&
+  Math.abs(value) <= 3.4028234663852886e38;
 const validateFiles = (group, sizes, name) => {
   if (
-    !group ||
+    !object(group) ||
     !Array.isArray(group.files) ||
     !sizes.includes(group.files.length) ||
-    group.files.some((file) => typeof file !== "string" || !file.length) ||
+    group.files.some((file) => !isPackagePath(file) || file === "meta.json") ||
     new Set(group.files).size !== group.files.length
   )
     invalid(`${name} has missing or invalid image filenames.`);
@@ -32,7 +42,7 @@ const validateRanges = (mins, maxs, count, name) => {
     maxs.length !== count ||
     mins.some(
       (min, i) =>
-        !Number.isFinite(min) || !Number.isFinite(maxs[i]) || min > maxs[i],
+        !float32(min) || !float32(maxs[i]) || min > maxs[i],
     )
   )
     invalid(`${name} has invalid attribute ranges.`);
@@ -41,7 +51,7 @@ const validateCodebook = (group, name) => {
   if (
     !Array.isArray(group.codebook) ||
     !positiveInteger(group.codebook.length, 256) ||
-    group.codebook.some((value) => !Number.isFinite(Math.fround(value)))
+    group.codebook.some((value) => !float32(value))
   )
     invalid(`${name} has an invalid codebook.`);
 };
@@ -74,9 +84,14 @@ function unpackQuaternion(bytes, offset) {
   return quaternion;
 }
 
-export function validateTSOGMetadata(meta) {
-  if (!meta || meta.version !== 4)
+export function validateTSOGMetadata(meta, { requireProfile = false } = {}) {
+  if (!object(meta) || meta.version !== 4)
     invalid("only the original exporter's version 4 is supported.");
+  if (meta.profile !== undefined) {
+    if (!object(meta.profile) || meta.profile.id !== TSOG_PROFILE.id ||
+        meta.profile.version !== TSOG_PROFILE.version)
+      invalid("unsupported TSOG playback profile or profile version.");
+  } else if (requireProfile) invalid("an explicit TSOG playback profile is required.");
   if (!positiveInteger(meta.count))
     invalid("count must be a positive integer.");
   validateFiles(meta.means, [2], "means");
@@ -117,19 +132,42 @@ export function validateTSOGMetadata(meta) {
   }
   if (meta.temporal !== undefined) {
     if (
-      !meta.temporal ||
+      !object(meta.temporal) ||
       Object.keys(meta.temporal).some((key) => key !== "means")
     )
       invalid("only first-order translation motion is supported.");
     const motion = meta.temporal.means;
     validateFiles(motion, [1, 2], "temporal.means");
-    if (motion.mins?.length !== 1 || motion.maxs?.length !== 1)
+    if (!Array.isArray(motion.mins) || !Array.isArray(motion.maxs) ||
+        motion.mins.length !== 1 || motion.maxs.length !== 1)
       invalid("only first-order translation motion is supported.");
     validateRanges(motion.mins[0], motion.maxs[0], 3, "temporal.means");
     if (!meta.timeline) invalid("motion requires a timeline.");
   }
   validatePlaybackMetadata(meta);
+  try {
+    resolvePlayback({
+      timelineMode: !meta.timeline ? 2 : meta.timeline.type === 0 ? 1 : 0,
+      nFrames: !meta.timeline ? 1 : meta.timeline.type === 0 ? meta.timeline.N : null,
+      fps: meta.fps,
+      playback: meta.playback,
+    });
+  } catch (error) { invalid(error.message); }
   return meta;
+}
+
+export async function readTSOGMetadata(archive) {
+  let meta;
+  try {
+    meta = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
+      await archive.read("meta.json", 4 * 1024 * 1024),
+    ));
+  } catch (error) {
+    if (error instanceof SyntaxError || error instanceof TypeError)
+      invalid("meta.json must be UTF-8 JSON.");
+    throw error;
+  }
+  return validateTSOGMetadata(meta);
 }
 
 /** Decode attribute images supplied by an async filename -> { width, height, rgba } callback. */
@@ -266,7 +304,7 @@ export async function decodeTSOG(
       }
     }, 0.65);
   }
-  if (model.useVelocity) {
+  if (meta.temporal) {
     const motion = meta.temporal.means;
     const [low, high] = await pair(motion);
     await rows((i, s, o) => {
@@ -276,7 +314,8 @@ export async function decodeTSOG(
         const value = high
           ? value16(low, high, s + a, min, max)
           : min + ((max - min) * low[s + a]) / 255;
-        model.velocityDuration[o + a] = finite(value);
+        finite(value);
+        if (model.useVelocity) model.velocityDuration[o + a] = value;
       }
     }, 0.75);
   }
@@ -310,17 +349,7 @@ export async function decodeTSOG(
 /** Read one packaged .tsog ZIP. Attribute decoding uses browser WebP and WebGL2. */
 export async function readTSOG(blob, options = {}) {
   const archive = await openZip(blob, options.signal);
-  let meta;
-  try {
-    meta = JSON.parse(
-      new TextDecoder().decode(
-        await archive.read("meta.json", 4 * 1024 * 1024),
-      ),
-    );
-  } catch (error) {
-    if (error instanceof SyntaxError) invalid("meta.json is not valid JSON.");
-    throw error;
-  }
+  const meta = await readTSOGMetadata(archive);
   const images = new AttributeImages();
   try {
     validateTSOGMetadata(meta);

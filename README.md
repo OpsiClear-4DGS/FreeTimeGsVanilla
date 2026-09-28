@@ -402,6 +402,15 @@ Use `?src=scene.tsog&speed=1.5&loop=0` to override playback for a link.
 Older packages keep their existing defaults. Audio and playback metadata are
 optional TSOG extensions; the `.ftgs.ply` layout is unchanged.
 
+The extensions are now specified as
+[TSOG Playback Profile 1](player/TSOG-SPEC.md), with a
+[metadata schema](player/tsog.schema.json) and
+[synthetic conformance corpus](player/tests/fixtures/tsog/CONFORMANCE.md).
+New packages declare the profile; older v4 files remain readable. Check metadata,
+referenced entries, checksums and image headers with
+`node player/tools/validate-tsog.mjs scene.tsog --require-profile`.
+Omit the flag for legacy files; full attribute validation is documented in the spec.
+
 ### AR and embedding
 
 On compatible devices, the **AR** button opens a WebXR session with tap-to-place

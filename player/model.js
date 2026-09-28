@@ -8,7 +8,7 @@ export async function readModel(blob, options = {}) {
     signature.byteLength === 4 &&
     signature.getUint32(0, true) === 0x04034b50
   ) {
-    const { readTSOG } = await import("./tsog.js?v=6");
+    const { readTSOG } = await import("./tsog.js?v=7");
     return readTSOG(blob, options);
   }
   return {

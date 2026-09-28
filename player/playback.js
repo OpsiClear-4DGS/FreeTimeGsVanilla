@@ -1,6 +1,12 @@
 // Optional player metadata in TSOG's root meta.json. See TSOG.md.
 export const MAX_AUDIO_BYTES = 128 * 1024 * 1024;
 
+// ZIP entry names are case-sensitive literal paths, never URLs.
+export const isPackagePath = (file) =>
+  typeof file === "string" && file.length > 0 &&
+  !/[\\\x00-\x1f:?#]/.test(file) &&
+  !file.split("/").some((part) => !part || part === "." || part === "..");
+
 const audioTypes = {
   mp3: "audio/mpeg",
   m4a: "audio/mp4",
@@ -65,12 +71,7 @@ export function validatePlaybackMetadata(meta) {
   if (audio !== undefined) {
     if (
       !object(audio) ||
-      typeof audio.file !== "string" ||
-      !audio.file.length ||
-      /[\\\x00-\x1f:?#]/.test(audio.file) ||
-      audio.file
-        .split("/")
-        .some((part) => !part || part === "." || part === "..")
+      !isPackagePath(audio.file)
     )
       invalid("audio.file must name a file inside the package.");
     const attributes = [
@@ -134,6 +135,8 @@ export function resolvePlayback(data, options = {}) {
     !overrideTiming && playback.duration !== undefined
       ? playback.duration
       : Math.max(1, nFrames - (discrete ? 0 : 1)) / fps;
+  if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(fps) || fps <= 0)
+    throw new RangeError("Playback metadata produces invalid timing.");
   return {
     nFrames,
     fps,

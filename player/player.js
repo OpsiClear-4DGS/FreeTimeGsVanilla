@@ -1,6 +1,7 @@
-import { readFTGS } from "./ftgs.js";
-import { OrbitCamera, validateCameraView } from "./camera.js?v=3";
-import { SplatRenderer } from "./renderer.js";
+import { readFTGS } from "./ftgs.js?v=4";
+import { OrbitCamera, validateCameraView } from "./camera.js?v=4";
+import { SplatRenderer } from "./renderer.js?v=4";
+import { ARPresentation, isARSupported } from "./xr.js?v=4";
 
 export const PLAYER_EVENTS = Object.freeze([
   "loadstart",
@@ -12,6 +13,7 @@ export const PLAYER_EVENTS = Object.freeze([
   "ended",
   "abort",
   "error",
+  "arstatechange",
   "destroy",
 ]);
 const owners = new WeakMap();
@@ -42,6 +44,13 @@ export class FTGSPlayer extends EventTarget {
   #progress = 0;
   #contextLost = false;
   #options;
+  #ar = null;
+  #arError = null;
+  #xrOrder = null;
+
+  static isARSupported() {
+    return isARSupported();
+  }
 
   constructor(
     canvas,
@@ -97,8 +106,10 @@ export class FTGSPlayer extends EventTarget {
       document.addEventListener(
         "visibilitychange",
         () => {
-          if (document.hidden) this.pause();
-          this.#previousTick = performance.now();
+          if (!this.#ar) {
+            if (document.hidden) this.pause();
+            this.#previousTick = performance.now();
+          }
         },
         options,
       );
@@ -155,6 +166,13 @@ export class FTGSPlayer extends EventTarget {
       sourceCount: this.#model?.sourceCount ?? 0,
       progress: this.#progress,
       error: this.#error,
+      ar: {
+        status: this.#ar ? (this.#ar.active ? "presenting" : "starting") : "inactive",
+        placed: this.#ar?.placed ?? false,
+        hitTest: Boolean(this.#ar?.hitSource),
+        surface: this.#ar?.surface ?? false,
+        error: this.#arError,
+      },
     };
   }
 
@@ -170,6 +188,7 @@ export class FTGSPlayer extends EventTarget {
     this.dispatchEvent(new CustomEvent(type, { detail: this.state }));
   }
   #fail(error) {
+    void this.exitAR();
     this.#status = "error";
     this.#error = error.message;
     this.pause();
@@ -185,6 +204,8 @@ export class FTGSPlayer extends EventTarget {
     signal?.throwIfAborted();
     const generation = ++this.#generation;
     this.#loadController?.abort();
+    this.#arError = null;
+    void this.exitAR();
     this.#camera.stopMoving();
     const controller = (this.#loadController = new AbortController());
     const cancel = () => controller.abort();
@@ -314,6 +335,7 @@ export class FTGSPlayer extends EventTarget {
     this.#previousTick = performance.now();
     this.#dirty = true;
     this.#revision++;
+    this.#xrOrder = null;
     this.#emit("timeupdate");
     return this.state;
   }
@@ -325,6 +347,10 @@ export class FTGSPlayer extends EventTarget {
   }
   fitCamera() {
     this.#assertAlive();
+    if (this.#ar?.active) {
+      this.#ar.reset();
+      return;
+    }
     if (this.#view) this.#camera.restore(this.#view);
     else this.#camera.fit();
   }
@@ -334,6 +360,71 @@ export class FTGSPlayer extends EventTarget {
     this.#view = null;
     this.#camera.upAxis = up;
     this.#camera.fit();
+    if (this.#ar) {
+      this.#ar.up = up;
+      this.#ar.reset();
+    }
+  }
+
+  /** Call directly from a click/tap handler. Size is the scene's diameter in meters. */
+  async enterAR({ overlayRoot = null, size = 1 } = {}) {
+    this.#assertAlive();
+    if (!this.#model || this.#status === "loading" || !this.#worker)
+      throw new Error("Load a model before entering AR.");
+    if (this.#ar) throw new Error("AR is already starting or active.");
+    if (!Number.isFinite(size) || size <= 0)
+      throw new RangeError("AR size must be a positive number of meters.");
+    if (overlayRoot !== null && !(overlayRoot instanceof Element))
+      throw new TypeError("overlayRoot must be a DOM element.");
+    this.#arError = null;
+    this.#camera.stopMoving();
+    this.#camera.enabled = false;
+    this.#revision++;
+    this.#xrOrder = null;
+    const ar = new ARPresentation(this.#renderer, {
+      bounds: this.#camera.bounds,
+      up: this.#camera.upAxis,
+      size,
+      resolution: this.#options.resolution,
+      onFrame: this.#xrFrame,
+      onChange: () => this.#emit("arstatechange"),
+      onError: (error) => {
+        this.#arError = error.message;
+        this.#emit("arstatechange");
+      },
+      onEnd: () => {
+        if (this.#ar !== ar) return;
+        this.#ar = null;
+        this.#camera.enabled = true;
+        this.#camera.stopMoving();
+        this.#xrOrder = null;
+        this.#revision++;
+        this.#dirty = true;
+        this.#previousTick = performance.now();
+        if (this.#status !== "destroyed") this.#emit("arstatechange");
+      },
+    });
+    this.#ar = ar;
+    this.#emit("arstatechange");
+    try {
+      await ar.start(overlayRoot);
+      if (this.#ar !== ar) throw new DOMException("AR was cancelled.", "AbortError");
+      this.#previousTick = performance.now();
+      this.#emit("arstatechange");
+      return this.state;
+    } catch (error) {
+      await ar.stop();
+      if (error.name !== "AbortError" && this.#status !== "destroyed") {
+        this.#arError = error.message;
+        this.#emit("arstatechange");
+      }
+      throw error;
+    }
+  }
+
+  async exitAR() {
+    await this.#ar?.stop();
+    return this.state;
   }
 
   #connectWorker(worker, data) {
@@ -376,7 +467,10 @@ export class FTGSPlayer extends EventTarget {
       )
         return;
       try {
-        this.#renderer.draw(
+        if (request.xr) {
+          if (this.#ar?.active)
+            this.#xrOrder = { order: result.order, time: request.time };
+        } else if (!this.#ar) this.#renderer.draw(
           result.order,
           request.camera,
           request.time,
@@ -391,37 +485,61 @@ export class FTGSPlayer extends EventTarget {
       fail(new Error(`Render worker failed: ${event.message}`));
   }
 
-  #tick = (now) => {
-    const elapsed = Math.min((now - this.#previousTick) / 1000, 0.25);
+  #advance(now) {
+    const elapsed = Math.max(0, Math.min((now - this.#previousTick) / 1000, 0.25));
     this.#previousTick = now;
-    if (this.#model && this.#status !== "loading" && !this.#contextLost) {
-      this.#camera.update(elapsed);
-      if (this.#playing) {
-        const next = this.#time + elapsed / this.duration;
-        this.#time = this.#options.loop ? next % 1 : Math.min(1, next);
-        this.#dirty = true;
-        if (!this.#options.loop && next >= 1) {
-          this.pause();
-          this.#emit("timeupdate");
-          this.#emit("ended");
-        } else if (now - this.#lastTimeEvent >= 100) {
-          this.#lastTimeEvent = now;
-          this.#emit("timeupdate");
-        }
+    if (this.#playing) {
+      const next = this.#time + elapsed / this.duration;
+      this.#time = this.#options.loop ? next % 1 : Math.min(1, next);
+      this.#dirty = true;
+      if (!this.#options.loop && next >= 1) {
+        this.pause();
+        this.#emit("timeupdate");
+        this.#emit("ended");
+      } else if (now - this.#lastTimeEvent >= 100) {
+        this.#lastTimeEvent = now;
+        this.#emit("timeupdate");
       }
-      if (this.#dirty && !this.#pending && this.#worker) {
-        this.#dirty = false;
-        this.#pending = {
-          time: this.#time,
-          camera: this.#camera.snapshot(),
-          revision: this.#revision,
-        };
-        this.#worker.postMessage({
-          type: "sort",
-          time: this.#time,
-          view: this.#pending.camera.view,
-          near: this.#pending.camera.near,
-        });
+    }
+    return elapsed;
+  }
+
+  #sort(camera, xr = false) {
+    if (this.#pending || !this.#worker) return;
+    this.#dirty = false;
+    this.#pending = { time: this.#time, camera, revision: this.#revision, xr };
+    this.#worker.postMessage({
+      type: "sort", time: this.#time, view: camera.view,
+      // Retain behind-camera centers in XR: a newer tracked pose can reveal them
+      // before the next asynchronous sort. Each eye clips its own near plane.
+      near: xr ? -Infinity : camera.near,
+    });
+  }
+
+  #xrFrame = (now, frame) => {
+    if (!frame || !this.#model || !this.#ar?.active) {
+      this.#previousTick = now;
+      return;
+    }
+    this.#advance(now);
+    if (!this.#ar?.active) return; // A playback event may unload or destroy us.
+    this.#sort(frame.camera, true);
+    if (!this.#xrOrder) return;
+    // Always draw from the current tracked pose, even while a worker is sorting.
+    // Reuse the most recent time-consistent order for both eyes.
+    for (const { camera, viewport } of frame.views)
+      this.#renderer.draw(
+        this.#xrOrder.order, camera, this.#xrOrder.time,
+        this.#model.degree, this.#options.resolution, viewport,
+      );
+  };
+
+  #tick = (now) => {
+    if (!this.#ar) {
+      const elapsed = this.#advance(now);
+      if (this.#model && this.#status !== "loading" && !this.#contextLost) {
+        this.#camera.update(elapsed);
+        if (this.#dirty) this.#sort(this.#camera.snapshot());
       }
     }
     if (this.#status !== "destroyed")
@@ -434,6 +552,7 @@ export class FTGSPlayer extends EventTarget {
     this.#generation++;
     this.#loadController?.abort();
     this.#status = "destroyed";
+    void this.exitAR();
     this.#playing = false;
     cancelAnimationFrame(this.#raf);
     this.#events.abort();

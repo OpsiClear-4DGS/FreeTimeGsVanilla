@@ -187,6 +187,9 @@ export class FTGSEmbed extends EventTarget {
   fitCamera() {
     return this.#request("fitCamera");
   }
+  exitAR() {
+    return this.#request("exitAR");
+  }
   getState() {
     return this.#request("getState");
   }

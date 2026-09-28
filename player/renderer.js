@@ -1,3 +1,5 @@
+import { canUseXR } from "./xr.js?v=4";
+
 const VERTEX = `#version 300 es
 precision highp float;
 precision highp int;
@@ -5,10 +7,10 @@ precision highp sampler2D;
 layout(location=0) in vec2 corner;
 layout(location=1) in uint splatId;
 uniform sampler2D positions, velocities, covarianceA, covarianceB, harmonics;
-uniform mat4 view;
+uniform mat4 view, projection;
 uniform vec3 eye;
-uniform vec2 viewport;
-uniform float time, focal, nearPlane, opacityFloor;
+uniform vec2 viewport, focal;
+uniform float time, nearPlane, opacityFloor;
 uniform int coefficients, shDegree;
 uniform bool useVelocity;
 out vec2 gaussian;
@@ -54,17 +56,18 @@ void main() {
   vec3 back=vec3(view[0][2],view[1][2],view[2][2]);
   // Bound the covariance Jacobian outside the frustum, as in the CUDA rasterizer.
   // Without this, near-camera offscreen centers produce screen-filling ellipses.
-  vec2 limit=1.3*viewport/(2.0*focal);
-  vec2 slope=clamp(center.xy/depth,-limit,limit);
-  vec3 jx=(focal/depth)*(right+slope.x*back);
-  vec3 jy=(focal/depth)*(up+slope.y*back);
+  vec2 halfFov=viewport/(2.0*focal);
+  vec2 slope=clamp(center.xy/depth,(projection[2].xy-1.3)*halfFov,(projection[2].xy+1.3)*halfFov);
+  vec3 jx=(focal.x/depth)*(right+slope.x*back);
+  vec3 jy=(focal.y/depth)*(up+slope.y*back);
   float aa=dot(jx,C*jx)+0.3, ab=dot(jx,C*jy), bb=dot(jy,C*jy)+0.3;
   float mid=0.5*(aa+bb), delta=length(vec2(0.5*(aa-bb),ab));
   float l1=max(mid+delta,0.1), l2=max(mid-delta,0.1);
   vec2 axis=abs(ab)>0.000001 ? normalize(vec2(ab,l1-aa)) : (aa>=bb ? vec2(1,0) : vec2(0,1));
   vec2 offset=corner.x*sqrt(l1)*axis+corner.y*sqrt(l2)*vec2(-axis.y,axis.x);
-  vec2 ndc=(focal*center.xy/depth+offset)*2.0/viewport;
-  gl_Position=vec4(ndc,0.0,1.0);
+  vec4 clip=projection*vec4(center,1.0);
+  vec2 ndc=clip.xy/clip.w+offset*2.0/viewport;
+  gl_Position=vec4(ndc,clip.z/clip.w,1.0);
   vec3 direction=world-eye;
   direction /= max(length(direction),0.000001);
   color=vec4(shColor(id,direction),opacity);
@@ -87,10 +90,11 @@ export class SplatRenderer {
   constructor(canvas) {
     this.canvas = canvas;
     const gl = (this.gl = canvas.getContext("webgl2", {
-      alpha: false,
+      alpha: true,
       antialias: false,
       depth: false,
       stencil: false,
+      xrCompatible: canUseXR(),
     }));
     if (!gl)
       throw new Error(
@@ -124,6 +128,7 @@ export class SplatRenderer {
         "covarianceB",
         "harmonics",
         "view",
+        "projection",
         "eye",
         "viewport",
         "time",
@@ -229,18 +234,31 @@ export class SplatRenderer {
     this.useVelocity = model.useVelocity;
     this.opacityFloor = model.opacityFloor;
   }
-  draw(order, camera, time, degree, resolution = 1) {
+  beginXRFrame(layer) {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+  draw(order, camera, time, degree, resolution = 1, viewport = null) {
     const gl = this.gl,
       { canvas } = this;
-    const ratio = Math.min(2, window.devicePixelRatio || 1) * resolution;
-    const width = Math.max(1, Math.round(canvas.clientWidth * ratio)),
-      height = Math.max(1, Math.round(canvas.clientHeight * ratio));
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+    if (!viewport) {
+      const ratio = Math.min(2, window.devicePixelRatio || 1) * resolution;
+      const width = Math.max(1, Math.round(canvas.clientWidth * ratio)),
+        height = Math.max(1, Math.round(canvas.clientHeight * ratio));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.clearColor(0.027, 0.039, 0.047, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      viewport = { x: 0, y: 0, width, height };
     }
-    gl.viewport(0, 0, width, height);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    const { x, y, width, height } = viewport;
+    gl.viewport(x, y, width, height);
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);
     const u = this.uniforms;
@@ -256,21 +274,31 @@ export class SplatRenderer {
       gl.uniform1i(u[name], i);
     });
     gl.uniformMatrix4fv(u.view, false, camera.view);
+    const f = 1 / Math.tan(camera.fov / 2);
+    const projection = camera.projection ?? new Float32Array([
+      f * height / width, 0, 0, 0, 0, f, 0, 0,
+      0, 0, -1, -1, 0, 0, -2 * camera.near, 0,
+    ]);
+    gl.uniformMatrix4fv(u.projection, false, projection);
     gl.uniform3fv(u.eye, camera.eye);
     gl.uniform2f(u.viewport, width, height);
     gl.uniform1f(u.time, time);
-    gl.uniform1f(u.focal, height / (2 * Math.tan(camera.fov / 2)));
+    gl.uniform2f(u.focal, width * projection[0] / 2, height * projection[5] / 2);
     gl.uniform1f(u.nearPlane, camera.near);
     gl.uniform1i(u.coefficients, this.coefficients);
     gl.uniform1i(u.shDegree, degree);
     gl.uniform1i(u.useVelocity, this.useVelocity ? 1 : 0);
     gl.uniform1f(u.opacityFloor, this.opacityFloor);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.order);
-    gl.bufferData(gl.ARRAY_BUFFER, order, gl.DYNAMIC_DRAW);
+    if (this.lastOrder !== order) {
+      gl.bufferData(gl.ARRAY_BUFFER, order, gl.DYNAMIC_DRAW);
+      this.lastOrder = order;
+    }
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, order.length);
   }
   destroy() {
     const gl = this.gl;
+    this.lastOrder = null;
     // A current program remains alive after deleteProgram until it is unbound.
     gl.useProgram(null);
     gl.bindVertexArray(null);

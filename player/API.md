@@ -73,8 +73,11 @@ Constructor options:
 | `pause()` | Pause at the current time. |
 | `seek(time)` | Seek to normalized time, clamped to `[0, 1]`. Preserve the playing/paused state. Non-finite values throw. |
 | `setView(view)` | Set and bookmark `{ eye: [x,y,z], target: [x,y,z], up: "y" or "z", fov: 45 }`. |
-| `fitCamera()` | Restore the bookmarked view, or fit the loaded model. |
+| `fitCamera()` | Restore the bookmarked view, or fit the loaded model. In AR, restart placement. |
 | `setUpAxis(up)` | Canvas API only: change up axis and fit the model, clearing the bookmark. |
+| `await FTGSPlayer.isARSupported()` | Canvas API static method: check immersive AR availability without requesting a session. |
+| `await enterAR(options?)` | Canvas API only: start AR from a user click or tap. Options: `size` in meters (default `1`) and optional `overlayRoot` element. |
+| `await exitAR()` | End AR and return to the desktop camera. Available on both APIs. |
 | `destroy()` | Release resources. Safe to call more than once. |
 
 `load()` options are `name`, `view`, and `autoplay` (override the constructor
@@ -87,7 +90,7 @@ model is loaded.
 
 `player.state` is a snapshot with `status`, `loaded`, `playing`, `time`,
 `currentTime`, `duration`, `fps`, `loop`, `nFrames`, `name`, `pointCount`,
-`sourceCount`, `progress`, and `error`. `time` is normalized; `currentTime` and
+`sourceCount`, `progress`, `error`, and `ar`. `time` is normalized; `currentTime` and
 `duration` are seconds. `progress` is parsing progress from zero to one, not
 download progress. `error` is a message or `null`. Status is `empty`, `loading`,
 `ready`, `error`, or `destroyed`. The canvas API also has read-only `time`,
@@ -95,12 +98,65 @@ download progress. `error` is a message or `null`. Status is `empty`, `loading`,
 
 Subscribe with `addEventListener`. Every event's `detail` contains a state snapshot:
 `loadstart`, `progress`, `loaded`, `play`, `pause`, `timeupdate`, `ended`, `abort`,
-`error`, and `destroy`. Playback time events are limited to about ten per second;
+`error`, `arstatechange`, and `destroy`. Playback time events are limited to about ten per second;
 explicit seeks emit immediately. `ended` fires when playback stops with looping
-disabled. Hiding the document pauses playback. `destroy()` cancels downloads,
+disabled. Hiding the desktop document pauses playback. `destroy()` ends AR, cancels downloads,
 terminates the sorting worker, removes internal listeners and resize observers,
 stops animation, and releases GPU resources. Your canvas remains in the DOM and
 can be reused by a new player.
+
+## WebXR AR
+
+Load a model, check availability, then request a session directly from a user
+gesture. Keep the availability check outside the click handler so it does not
+consume the gesture before `enterAR()` requests the session:
+
+```js
+const button = document.querySelector("#ar");
+button.hidden = !(await FTGSPlayer.isARSupported());
+button.onclick = () => {
+  const action = player.state.ar.status === "inactive"
+    ? player.enterAR({ size: 1 })
+    : player.exitAR();
+  action.catch(error => console.error(error.message));
+};
+player.addEventListener("arstatechange", ({ detail }) => {
+  button.textContent = detail.ar.status === "presenting" ? "Exit AR" : "AR";
+});
+```
+
+`size` sets the diameter of the model's fitted bounds in meters; files need no
+world-scale metadata. The model's configured Y/Z up axis is respected. Point
+the device at a surface and tap (or use a controller's select action) to place
+the preview. Surface hit testing is optional; without it, the preview appears
+1.5 meters ahead of the viewer. `fitCamera()` restarts placement. Exiting AR
+preserves the desktop camera and current playback time. Loading another model
+or destroying the player ends the session, including a pending entry request.
+
+`state.ar` contains `status` (`inactive`, `starting`, or `presenting`), `placed`,
+`hitTest` (surface detection available), `surface` (current preview found a
+surface), and `error` (message or `null`). Failures reject `enterAR()` and report
+through `arstatechange`; they do not change a loaded model's normal status.
+
+To retain custom HTML controls during AR, pass their container as `overlayRoot`.
+DOM overlay support is optional. Keep its background transparent and keep the
+desktop canvas outside that container (or hide it while presenting). Cancel
+`beforexrselect` on interactive controls so pressing them does not also place the
+scene. On devices without overlays, use the browser's system control to exit AR.
+The core API adds no controls or document styles.
+
+AR requires a compatible device/browser and a secure context (HTTPS or
+localhost). A plain HTTP LAN address will not enable it. Iframes also require
+`allow="xr-spatial-tracking"`, permitted by the parent's Permissions Policy.
+The browser handles the permission prompt. See the
+[WebXR session requirements](https://developer.mozilla.org/en-US/docs/Web/API/XRSystem/requestSession).
+
+XR uses current device poses and each eye's projection/viewport, with transparent
+premultiplied-alpha rendering. Both eyes share the most recent center-view sort;
+the current tracked pose is rendered even while the sorting worker is busy.
+Playback advances on XR frames and freezes while tracking is unavailable.
+Placement lasts for the current session; persistent anchors and real-world depth
+occlusion are not implemented.
 
 ## Iframe API
 
@@ -127,7 +183,12 @@ controller. The helper loads the player page and configures the connection.
 ```
 
 Iframe commands return promises; await them when ordering matters. Methods and
-events match the canvas API except `setUpAxis` and `load`'s `signal` option.
+events match the canvas API except `setUpAxis`, `enterAR`, the static support
+check, and `load`'s `signal` option. For AR, add `allow="xr-spatial-tracking"`
+to the iframe, keep the built-in controls enabled (omit `controls=0`), and press
+the AR button inside the player. Entry requires a user gesture in the child;
+it is deliberately not exposed as a postMessage command. The host can observe
+`arstatechange`, call `fitCamera()` to reposition, and `await exitAR()`.
 `player.state` is the latest received snapshot, initially `null`;
 `await player.getState()` requests a fresh one. A `File` or `Blob` can be passed
 directly without uploading it. Relative URLs passed to the helper's `load()`
@@ -136,7 +197,7 @@ resolve against the **player page**. A model server on a different origin from
 the iframe must allow CORS.
 
 Page options include `controls=0` to hide the transport, `autoplay=0`, `loop=0`,
-and the existing `fps`, `frames`, `points`, `resolution`, `up`, `view`, `src`, and
+`arSize` (AR scene diameter in meters), and the existing `fps`, `frames`, `points`, `resolution`, `up`, `view`, `src`, and
 `demo` options. Drag/drop and camera interaction still work with the transport
 hidden. `FTGSEmbed` also accepts `timeout` (connection, default 15,000 ms) and
 `requestTimeout` (each command, default 120,000 ms). A command timeout rejects the
@@ -175,7 +236,7 @@ export function FTGSCanvas({ source }) {
 ```
 
 Vue and other frameworks can use the same mount/destroy lifecycle. For direct
-canvas hosting, retain `player.js`, `ftgs.js`, `camera.js`, `renderer.js`,
+canvas hosting, retain `player.js`, `ftgs.js`, `camera.js`, `renderer.js`, `xr.js`,
 `sort-worker.js`, and `sort.js` together, or let your bundler process their module
 and worker URLs. Self-host these modules with your application so the module
 worker can load from the same origin. WebGL2 and adequate GPU memory are required.

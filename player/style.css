@@ -332,6 +332,38 @@ button:disabled {
   fill: currentColor;
   stroke: none;
 }
+.ar-button {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.ar-button[aria-pressed="true"] {
+  background: #ffffff26;
+}
+#viewer[data-ar="presenting"] {
+  background: transparent;
+}
+#viewer:xr-overlay {
+  background: transparent;
+}
+#viewer::backdrop {
+  background: transparent;
+}
+#viewer[data-ar="presenting"] #canvas {
+  visibility: hidden;
+  pointer-events: none;
+}
+#viewer[data-ar="presenting"] #open-file,
+#viewer[data-ar="presenting"] #fullscreen {
+  display: none;
+}
+#viewer[data-ar="presenting"] #reset-view {
+  display: grid;
+}
+.ar-hint {
+  padding: 8px 12px;
+  font-size: 12px;
+}
 .icon-button::after {
   content: attr(data-tooltip);
   position: absolute;

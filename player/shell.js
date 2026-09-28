@@ -19,6 +19,7 @@ export function mountPlayerShell(viewer) {
     </button>
     <input id="file" type="file" accept=".ply" hidden aria-label="Open FTGS file" />
     <div id="message" class="message" role="status" hidden></div>
+    <div id="ar-hint" class="message ar-hint" role="status" hidden></div>
     <div id="drop-hint" class="drop-hint" hidden>
       <svg aria-hidden="true"><use href="#open" /></svg><span>Drop to play</span>
     </div>
@@ -39,6 +40,7 @@ export function mountPlayerShell(viewer) {
         <button id="open-file" class="icon-button" data-tooltip="Open file (O)" aria-label="Open file">
           <svg aria-hidden="true"><use href="#open" /></svg>
         </button>
+        <button id="ar" class="icon-button ar-button" data-tooltip="View in AR" aria-label="View in AR" aria-pressed="false" disabled hidden>AR</button>
         <button id="fullscreen" class="icon-button" data-tooltip="Fullscreen (F)" aria-label="Fullscreen">
           <svg aria-hidden="true"><use id="fullscreen-icon" href="#expand" /></svg>
         </button>

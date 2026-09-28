@@ -356,6 +356,10 @@ seeking, automatic looping, orbit/pan/zoom, and WASD movement (Q/E down/up,
 Shift for faster movement). It runs as a static site
 without a build step or package installation.
 
+On compatible devices, the **AR** button opens a WebXR session with tap-to-place
+and animated playback. Use HTTPS (or localhost); see the
+[AR controls and setup](player/README.md#view-in-ar).
+
 ```bash
 python -m http.server 8765 --bind 127.0.0.1 --directory player
 ```

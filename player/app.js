@@ -1,7 +1,7 @@
-import { FTGSPlayer } from "./player.js?v=3";
-import { attachPlayerBridge } from "./bridge.js";
+import { FTGSPlayer } from "./player.js?v=4";
+import { attachPlayerBridge } from "./bridge.js?v=4";
 import { demoFile } from "./demo.js";
-import { mountPlayerShell } from "./shell.js?v=3";
+import { mountPlayerShell } from "./shell.js?v=4";
 
 mountPlayerShell(document.getElementById("viewer"));
 const $ = (id) => document.getElementById(id);
@@ -21,6 +21,7 @@ const showControls = query.get("controls") !== "0";
 const events = new AbortController();
 const options = { signal: events.signal };
 let player, detachBridge, idleTimer, messageTimer;
+let arSupported = false;
 let up = query.get("up") === "z" ? "z" : "y";
 
 const clock = (seconds) => {
@@ -55,7 +56,7 @@ function updateFullscreen() {
 function wakeControls() {
   clearTimeout(idleTimer);
   $("viewer").classList.remove("idle");
-  if (player?.playing && player.state.status !== "loading")
+  if (player?.playing && player.state.status !== "loading" && player.state.ar.status === "inactive")
     idleTimer = setTimeout(() => $("viewer").classList.add("idle"), 1800);
 }
 function status(text = "", state = "ready", timeout = 0) {
@@ -94,6 +95,34 @@ function updatePlaying() {
     ? "Pause (Space)"
     : "Play (Space)";
   wakeControls();
+}
+function updateAR() {
+  const state = player.state;
+  const { ar } = state;
+  const active = ar.status === "presenting";
+  $("viewer").dataset.ar = ar.status;
+  $("ar").hidden = !arSupported;
+  $("ar").disabled = !state.loaded || state.status === "loading" || ar.status === "starting";
+  $("ar").setAttribute("aria-pressed", String(active));
+  $("ar").setAttribute("aria-label", active ? "Exit AR" : "View in AR");
+  $("ar").dataset.tooltip = active ? "Exit AR" : "View in AR";
+  $("reset-view").setAttribute("aria-label", active ? "Reposition" : "Reset view");
+  $("reset-view").dataset.tooltip = active ? "Reposition (R)" : "Reset view (R)";
+  $("ar-hint").hidden = !active;
+  $("ar-hint").textContent = ar.placed
+    ? "Placed · Reset to reposition"
+    : ar.surface
+      ? "Tap to place on this surface"
+      : ar.hitTest
+        ? "Point at a surface, then tap to place"
+        : "Tap to place in front of you";
+  if (ar.error) status(ar.error, "error", 6000);
+  else if (ar.status !== "inactive") status();
+  wakeControls();
+}
+async function checkAR() {
+  arSupported = await FTGSPlayer.isARSupported();
+  if (!events.signal.aborted) updateAR();
 }
 async function load(input, loadOptions) {
   if (!player) return;
@@ -200,7 +229,27 @@ try {
   );
   for (const type of ["play", "pause"])
     player.addEventListener(type, updatePlaying, options);
+  for (const type of ["arstatechange", "loadstart", "loaded", "error", "abort"])
+    player.addEventListener(type, updateAR, options);
+  void checkAR();
+  navigator.xr?.addEventListener("devicechange", checkAR, options);
   detachBridge = attachPlayerBridge(player, query.get("parentOrigin"));
+
+  $("ar").addEventListener("click", async () => {
+    try {
+      if (player.state.ar.status !== "inactive") await player.exitAR();
+      else {
+        const size = Number(query.get("arSize"));
+        await player.enterAR({
+          overlayRoot: $("viewer"),
+          size: Number.isFinite(size) && size > 0 ? size : 1,
+        });
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") status(error.message, "error", 6000);
+    }
+  }, options);
+  $("controls").addEventListener("beforexrselect", (event) => event.preventDefault(), options);
 
   for (const id of ["empty", "open-file"])
     $(id).addEventListener("click", () => $("file").click(), options);
@@ -319,8 +368,8 @@ try {
               Math.max(1, player.state.nFrames - 1),
         );
       } else if (event.key.toLowerCase() === "r") player.fitCamera();
-      else if (event.key.toLowerCase() === "f") $("fullscreen").click();
-      else if (event.key.toLowerCase() === "o") $("file").click();
+      else if (event.key.toLowerCase() === "f" && player.state.ar.status === "inactive") $("fullscreen").click();
+      else if (event.key.toLowerCase() === "o" && player.state.ar.status === "inactive") $("file").click();
       else if (event.key.toLowerCase() === "u") {
         up = up === "y" ? "z" : "y";
         player.setUpAxis(up);

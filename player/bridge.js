@@ -1,4 +1,4 @@
-import { PLAYER_EVENTS } from "./player.js?v=3";
+import { PLAYER_EVENTS } from "./player.js?v=4";
 
 const protocol = "ftgs-player";
 const version = 1;
@@ -68,6 +68,9 @@ export function attachPlayerBridge(player, parentOrigin) {
             break;
           case "fitCamera":
             player.fitCamera();
+            break;
+          case "exitAR":
+            await player.exitAR();
             break;
           case "getState":
             break;

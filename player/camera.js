@@ -59,6 +59,7 @@ export class OrbitCamera {
     this.onChange = onChange;
     this.keys = new Set();
     this.fast = false;
+    this.enabled = true;
     this.addedTabIndex = !canvas.hasAttribute("tabindex");
     if (this.addedTabIndex) canvas.tabIndex = 0;
     this.upAxis = "y";
@@ -69,6 +70,7 @@ export class OrbitCamera {
     canvas.addEventListener(
       "keydown",
       (event) => {
+        if (!this.enabled) return;
         if (
           event.ctrlKey ||
           event.metaKey ||
@@ -114,6 +116,7 @@ export class OrbitCamera {
     canvas.addEventListener(
       "pointerdown",
       (e) => {
+        if (!this.enabled) return;
         canvas.focus();
         canvas.setPointerCapture(e.pointerId);
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -123,6 +126,7 @@ export class OrbitCamera {
     canvas.addEventListener(
       "pointermove",
       (e) => {
+        if (!this.enabled) return;
         const old = pointers.get(e.pointerId);
         if (!old) return;
         const dx = e.clientX - old.x,
@@ -155,6 +159,7 @@ export class OrbitCamera {
     canvas.addEventListener(
       "wheel",
       (e) => {
+        if (!this.enabled) return;
         e.preventDefault();
         this.zoom(Math.exp(e.deltaY * 0.001));
         this.onChange();

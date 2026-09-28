@@ -77,6 +77,7 @@ the FTGS file itself does not store capture cameras or frame rate.
 | Fit camera / restore saved view | Reset view button or R |
 | Switch Y up / Z up | U |
 | Fullscreen | Fullscreen button or F |
+| Enter / exit AR | AR button, shown on supported devices |
 
 Shortcuts apply when the canvas or page has focus, leaving form controls' keys
 available normally. The controls remain visible while paused or focused with the
@@ -87,6 +88,22 @@ direction, with speed scaled to the scene and zoom level; Q/E follows the Y or Z
 up axis. The keys work during playback and while paused. Releasing a key, focusing
 another control, or leaving the tab stops movement. Browser shortcuts and text
 fields keep their usual behavior. Movement uses the physical WASD/QE key positions.
+
+## View in AR
+
+On a device and browser that support WebXR immersive AR, open the player over
+HTTPS, load a file, and press **AR**. Point at a surface and tap to place the
+scene. If surface detection is unavailable, tap to place it in front of you.
+Move your device to look around. The scene starts at about one meter across;
+add `?arSize=0.5` for a smaller preview, or set `size` through the [canvas API](API.md#webxr-ar).
+
+Playback and seeking work in AR. Where the browser supports HTML overlays, the
+same compact controls stay visible: **Reset** repositions and **AR** exits.
+Otherwise, use the browser's system exit control. Exiting restores the desktop
+view and keeps the playback position. Devices without immersive AR keep the
+normal player. GitHub Pages provides HTTPS; a plain HTTP LAN address cannot
+enable WebXR. Localhost is allowed for development. Iframe hosts must delegate
+`xr-spatial-tracking`; see the [embedding guide](API.md#webxr-ar).
 
 ## Format and rendering
 
@@ -146,5 +163,16 @@ commands, lifecycle events, cancellation, cleanup, and remounting:
 ```bash
 uv run --no-project --with playwright python player/tests/browser_api.py
 ```
+
+The XR check uses a simulated device with the real WebGL renderer and sorting
+worker. It covers stereo/mono views, transparency, current-pose rendering,
+placement, playback, failure recovery, teardown, UI and iframe entry:
+
+```bash
+uv run --no-project --with playwright python player/tests/browser_xr.py
+```
+
+Physical-device testing is still needed to check camera passthrough, surface
+tracking, and performance on the target hardware.
 
 It also accepts `--browser /path/to/chromium`.

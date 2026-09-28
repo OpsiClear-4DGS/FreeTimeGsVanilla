@@ -1,4 +1,4 @@
-// The format is owned by src/export_ftgs_ply.py and documented in README.md.
+// Vanilla FreeTimeGS PLY version 1; see FORMAT.md for the complete layout.
 const REQUIRED = [
   "x",
   "y",
@@ -136,6 +136,8 @@ export function boundsForModel(positionTime) {
     hi.push(values[Math.ceil((values.length - 1) * 0.99)]);
   }
   return {
+    min: lo,
+    max: hi,
     center: lo.map((v, i) => (v + hi[i]) / 2),
     radius: Math.max(0.01, Math.hypot(...lo.map((v, i) => hi[i] - v)) / 2),
   };

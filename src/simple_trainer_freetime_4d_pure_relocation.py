@@ -143,7 +143,7 @@ import math
 import os
 import time
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -175,12 +175,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from datasets.FreeTime_dataset import FreeTimeParser, FreeTimeDataset, skip_none_collate
-from foreground_loss import composite_foreground
+from foreground_loss import composite_foreground, foreground_mse_loss
 from utils import knn, rgb_to_sh, set_random_seed
 from init_common import read_init_arrays, apply_scene_transform
 from freetime_ops import (
-    MIN_DURATION, temporal_opacity, positions_at_time, regularization_4d,
-    validate_vanilla_checkpoint,
+    temporal_opacity, positions_at_time, regularization_4d,
+    validate_vanilla_checkpoint, duration_bounds, checkpoint_duration_bounds,
+)
+from training_policy import (
+    TrainingPhase, validate_phases, apply_phase, IterationSampler,
+    capture_rng_state, restore_rng_state,
 )
 from video_io import MP4Writer
 from export_ftgs_ply import export_checkpoint, save_ftgs_ply
@@ -349,6 +353,18 @@ class Config:
     max_steps: int = 70_000
     """Total number of training iterations."""
 
+    lr_schedule_steps: Optional[int] = None
+    """Learning-rate horizon; None uses max_steps. Resume preserves the saved horizon."""
+
+    freeze_times: bool = False
+    """Keep temporal centers anchored while retaining learnable velocities."""
+
+    freeze_durations: bool = False
+    """Keep temporal widths fixed."""
+
+    phases: tyro.conf.Suppress[List[TrainingPhase]] = field(default_factory=list)
+    """Python API: ordered phase changes; unspecified fields inherit the preceding phase."""
+
     batch_size: int = 1
     """Batch size for training (number of images per iteration)."""
 
@@ -392,6 +408,12 @@ class Config:
     E.g., with keyframe_step=5, total_frames=60: gap=5/60=0.083, duration=0.083*2=0.167.
     Use 2.0 for double coverage (recommended), 3.0 for triple overlap."""
 
+    min_duration_frames: Optional[float] = None
+    """Minimum temporal sigma in frames. None retains the legacy normalized 0.02 floor."""
+
+    max_duration_frames: Optional[float] = None
+    """Optional maximum temporal sigma in frames."""
+
     # ==================== Loss Weights ====================
     lambda_img: float = 0.8
     """Weight for L1 image reconstruction loss."""
@@ -405,6 +427,12 @@ class Config:
     lambda_alpha: float = 0.1
     """Full-image alpha L1 weight in transparent mode (Brush's default weight)."""
 
+    lambda_foreground: float = 0.0
+    """Additional RGB MSE averaged over target alpha > 0.5; requires transparent mode."""
+
+    lpips_interval: int = 1
+    """Evaluate LPIPS every N iterations and multiply its weight by N."""
+
     lambda_4d_reg: float = 1e-3
     """Weight for 4D regularization loss: Lreg = (1/N) * Σ(σ * stop_grad[σ(t)]).
     Paper value: λreg = 1e-2. Reduced to 1e-3 to prevent over-suppression."""
@@ -416,7 +444,8 @@ class Config:
     # ==================== Training Phases (Annealing Strategy) ====================
     # NOTE: Per FreeTimeGS paper, we do NOT use warmup/canonical phases that freeze velocity.
     # Freezing velocity destroys ROMA initialization by causing positions to drift to average.
-    # Instead: enable all 4D params from step 0, disable densification until ROMA settles.
+    # Defaults enable all 4D params from step 0 and let ROMA settle before
+    # densification. Explicit policies can anchor temporal centers/widths.
 
     densification_start_step: int = 1000
     """Start densification/relocation/pruning after this step.
@@ -613,6 +642,9 @@ class Config:
     """Path to checkpoint file (.pt) to resume training from or export from.
     Checkpoint contains: splats state_dict, optimizer states, and step number."""
 
+    resume_mode: Literal["resume", "finetune"] = "resume"
+    """Resume restores saved training policy/state. Finetune starts fresh Adam at step zero."""
+
     export_only: bool = False
     """If True and ckpt_path is provided, load checkpoint and export PLY/videos
     without training. With format='ftgs', export just the model on CPU without
@@ -625,6 +657,10 @@ class Config:
         if self.export_ply_steps is not None:
             self.export_ply_steps = [int(i * factor) for i in self.export_ply_steps]
         self.max_steps = int(self.max_steps * factor)
+        if self.lr_schedule_steps is not None:
+            self.lr_schedule_steps = int(self.lr_schedule_steps * factor)
+        for phase in self.phases:
+            phase.start_step = int(phase.start_step * factor)
         self.sh_degree_interval = int(self.sh_degree_interval * factor)
         self.densification_start_step = int(self.densification_start_step * factor)
         self.reg_4d_start_step = int(self.reg_4d_start_step * factor)
@@ -865,14 +901,17 @@ def load_init_npz_keyframe(
 
 def resolve_init_duration(cfg: Config, durations: Tensor) -> float:
     """Resolve the auto sentinel before it enters log-duration or loss math."""
+    minimum, maximum = duration_bounds(
+        cfg.end_frame - cfg.start_frame, cfg.min_duration_frames, cfg.max_duration_frames,
+    )
     if cfg.init_duration > 0:
-        return float(cfg.init_duration)
-    usable = durations[torch.isfinite(durations) & (durations > 0)]
-    if usable.numel():
-        return max(float(usable.median()), MIN_DURATION)
-    step = cfg.keyframe_step if cfg.keyframe_step > 0 else 1
-    return max(step / max(cfg.end_frame - cfg.start_frame - 1, 1)
-               * cfg.init_duration_multiplier, MIN_DURATION)
+        value = float(cfg.init_duration)
+    else:
+        usable = durations[torch.isfinite(durations) & (durations > 0)]
+        step = cfg.keyframe_step if cfg.keyframe_step > 0 else 1
+        value = (float(usable.median()) if usable.numel() else
+                 step / max(cfg.end_frame - cfg.start_frame - 1, 1) * cfg.init_duration_multiplier)
+    return min(max(value, minimum), maximum) if maximum is not None else max(value, minimum)
 
 
 def create_optimizers(cfg: Config, splats, scene_scale: float):
@@ -939,7 +978,10 @@ def create_splats_with_optimizers_4d(
     )
     if cfg.init_duration > 0:
         durations = durations.clamp_min(cfg.init_duration)
-    log_durations = durations.clamp_min(MIN_DURATION).log()
+    minimum, maximum = duration_bounds(
+        cfg.end_frame - cfg.start_frame, cfg.min_duration_frames, cfg.max_duration_frames,
+    )
+    log_durations = durations.clamp(min=minimum, max=maximum).log()
 
     # SH colors
     sh_colors = torch.zeros((N, (cfg.sh_degree + 1) ** 2, 3))
@@ -974,6 +1016,13 @@ class FreeTime4DRunner:
         if (cfg.alpha_mode not in ("ignore", "transparent")
                 or not math.isfinite(cfg.lambda_alpha) or cfg.lambda_alpha < 0):
             raise ValueError("Invalid alpha mode or alpha loss weight")
+        validate_phases(cfg)
+        if cfg.resume_mode not in ("resume", "finetune"):
+            raise ValueError("Invalid resume mode")
+        if (cfg.lambda_foreground > 0 or any((p.foreground_mse_weight or 0) > 0 for p in cfg.phases)) and cfg.alpha_mode != "transparent":
+            raise ValueError("Foreground MSE requires transparent RGBA training")
+        if cfg.max_steps < 1 or (cfg.lr_schedule_steps is not None and cfg.lr_schedule_steps < 1):
+            raise ValueError("Training steps and learning-rate horizon must be positive")
         set_random_seed(42 + local_rank)
 
         self.cfg = cfg
@@ -981,6 +1030,11 @@ class FreeTime4DRunner:
         self.local_rank = local_rank
         self.world_size = world_size
         self.device = f"cuda:{local_rank}"
+        self.duration_bounds = duration_bounds(
+            cfg.end_frame - cfg.start_frame, cfg.min_duration_frames, cfg.max_duration_frames,
+        )
+        self.lr_schedule_steps = cfg.lr_schedule_steps or cfg.max_steps
+        self.sample_seed = 42 + local_rank
 
         # Setup directories
         os.makedirs(cfg.result_dir, exist_ok=True)
@@ -1117,7 +1171,32 @@ class FreeTime4DRunner:
 
         ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
         validate_vanilla_checkpoint(ckpt)
+        state = ckpt.get("training_state")
+        if state and state.get("version") != 1:
+            raise ValueError("Unsupported checkpoint training-state version")
+        if state and self.cfg.resume_mode == "resume" and set(ckpt.get("optimizers", {})) != set(ckpt["splats"]):
+            raise ValueError("Checkpoint is missing Adam states; use finetune for fresh optimization")
+        if state and state["frame_range"] != [self.cfg.start_frame, self.cfg.end_frame]:
+            raise ValueError("Checkpoint frame range differs; reparameterize time before changing the range")
+        self.duration_bounds = checkpoint_duration_bounds(ckpt)
+        if self.cfg.resume_mode == "finetune" and (self.cfg.min_duration_frames is not None or self.cfg.max_duration_frames is not None):
+            self.duration_bounds = duration_bounds(
+                self.cfg.end_frame - self.cfg.start_frame,
+                self.cfg.min_duration_frames, self.cfg.max_duration_frames,
+            )
         self.cfg.use_velocity = bool(ckpt.get("use_velocity", self.cfg.use_velocity))
+
+        if state and self.cfg.resume_mode == "resume":
+            if any(state[name] != getattr(self.cfg, name) for name in ("alpha_mode", "data_factor", "lpips_net")):
+                raise ValueError("Resume requires the checkpoint's alpha mode, image factor and LPIPS network")
+            for name, value in state["config"].items():
+                setattr(self.cfg, name, ([TrainingPhase(**phase) for phase in value] if name == "phases" else value))
+            self.cfg.strategy = {"DefaultStrategy": DefaultStrategy, "MCMCStrategy": MCMCStrategy}[state["strategy_type"]](**state["strategy_config"])
+            self.lr_schedule_steps = state["lr_schedule_steps"]
+            self.cfg.lr_schedule_steps = self.lr_schedule_steps
+            self.scene_scale = state["scene_scale"]
+            self.sample_seed = state["sample_seed"]
+            self.effective_init_duration = state["effective_init_duration"]
 
         # Reinitialize splats from checkpoint (handles size mismatch from densification)
         ckpt_splats = ckpt["splats"]
@@ -1140,7 +1219,7 @@ class FreeTime4DRunner:
         print(f"  Loaded {len(self.splats['means']):,} Gaussians")
 
         # Set start step for resume
-        self.start_step = ckpt.get("step", 0) + 1
+        self.start_step = ckpt.get("step", 0) + 1 if self.cfg.resume_mode == "resume" else 0
         print(f"  Will resume from step {self.start_step}")
 
         # Resize gradient accumulator to match loaded Gaussians
@@ -1153,13 +1232,13 @@ class FreeTime4DRunner:
             self.optimizers = create_optimizers(cfg, self.splats, self.scene_scale)
 
             # Load optimizer states if available
-            if "optimizers" in ckpt:
+            if "optimizers" in ckpt and self.cfg.resume_mode == "resume":
                 for name, opt_state in ckpt["optimizers"].items():
                     if name in self.optimizers:
                         try:
                             self.optimizers[name].load_state_dict(opt_state)
                         except Exception as e:
-                            print(f"  Warning: Could not load optimizer state for {name}: {e}")
+                            raise RuntimeError(f"Cannot resume optimizer {name}; use finetune for fresh Adam") from e
                 print("  Loaded optimizer states")
 
             # Re-initialize strategy state for the loaded Gaussians
@@ -1168,6 +1247,50 @@ class FreeTime4DRunner:
                 self.strategy_state = self.cfg.strategy.initialize_state(scene_scale=self.scene_scale)
             elif isinstance(self.cfg.strategy, MCMCStrategy):
                 self.strategy_state = self.cfg.strategy.initialize_state()
+
+            if state and self.cfg.resume_mode == "resume":
+                if state["grad_accum"].shape != self.grad_accum.shape:
+                    raise ValueError("Checkpoint relocation statistics do not match its point count")
+                self.strategy_state = state["strategy_state"]
+                self.grad_accum = state["grad_accum"].to(self.device)
+                self.grad_count = state["grad_count"]
+                restore_rng_state(state["rng"], self.device)
+
+    def checkpoint(self, step: int):
+        """Capture policy, allocation statistics and RNG alongside Adam/model state."""
+        names = (
+            "position_lr", "scales_lr", "quats_lr", "opacities_lr", "sh0_lr", "shN_lr",
+            "times_lr", "durations_lr", "velocity_lr_start", "velocity_lr_end",
+            "freeze_times", "freeze_durations", "phases", "lambda_img", "lambda_ssim",
+            "min_duration_frames", "max_duration_frames", "random_bkgd", "sh_degree",
+            "packed", "antialiased", "near_plane", "far_plane",
+            "lambda_perc", "lambda_alpha", "lambda_foreground", "lpips_interval",
+            "lambda_4d_reg", "lambda_duration_reg", "reg_4d_start_step", "sh_degree_interval",
+            "use_relocation", "densification_start_step", "relocation_every", "relocation_stop_iter",
+            "relocation_opacity_threshold", "relocation_max_ratio", "relocation_lambda_grad",
+            "relocation_lambda_opa", "use_pruning", "prune_every", "prune_stop_iter",
+            "prune_opacity_threshold", "use_budget_pruning", "budget_prune_every", "budget_prune_threshold",
+        )
+        config = asdict(self.cfg)
+        minimum, maximum = self.duration_bounds
+        return dict(
+            step=step, use_velocity=self.cfg.use_velocity,
+            n_frames=self.cfg.end_frame - self.cfg.start_frame,
+            splats=self.splats.state_dict(),
+            optimizers={name: opt.state_dict() for name, opt in self.optimizers.items()},
+            model_spec=dict(time_units="normalized", duration_activation="exp",
+                            min_duration=minimum, max_duration=maximum),
+            training_state=dict(
+                version=1, frame_range=[self.cfg.start_frame, self.cfg.end_frame],
+                alpha_mode=self.cfg.alpha_mode, data_factor=self.cfg.data_factor, lpips_net=self.cfg.lpips_net,
+                config={name: config[name] for name in names},
+                lr_schedule_steps=self.lr_schedule_steps, sample_seed=self.sample_seed,
+                scene_scale=self.scene_scale, effective_init_duration=self.effective_init_duration,
+                strategy_type=type(self.cfg.strategy).__name__, strategy_config=asdict(self.cfg.strategy),
+                strategy_state=self.strategy_state, grad_accum=self.grad_accum,
+                grad_count=self.grad_count, rng=capture_rng_state(self.device),
+            ),
+        )
 
     def export_from_checkpoint(self):
         """Export PLY sequence and videos from loaded checkpoint (no training)."""
@@ -1360,7 +1483,10 @@ class FreeTime4DRunner:
 
     @torch.no_grad()
     def _project_temporal_params(self):
-        self.splats["durations"].clamp_(min=math.log(MIN_DURATION))
+        minimum, maximum = self.duration_bounds
+        self.splats["durations"].clamp_(
+            min=math.log(minimum), max=None if maximum is None else math.log(maximum),
+        )
 
     def compute_positions_at_time(self, t: float) -> Tensor:
         return positions_at_time(
@@ -1640,18 +1766,12 @@ class FreeTime4DRunner:
 
         max_steps = cfg.max_steps
 
-        # Resume at the same position-LR schedule index even for legacy files.
-        position_lr = cfg.position_lr * self.scene_scale * math.sqrt(cfg.batch_size)
-        for group in self.optimizers["means"].param_groups:
-            group["initial_lr"] = position_lr
-            group["lr"] = position_lr * 0.01 ** (self.start_step / max_steps)
-        schedulers = [torch.optim.lr_scheduler.ExponentialLR(
-            self.optimizers["means"], gamma=0.01 ** (1.0 / max_steps),
-        )]
-
-        # Data loader (with skip_none_collate to handle missing frames)
+        # Absolute iteration sampling and a separate loader RNG survive prefetch
+        # and avoid consuming the restored background/relocation RNG on restart.
         trainloader = torch.utils.data.DataLoader(
-            self.trainset, batch_size=cfg.batch_size, shuffle=True,
+            self.trainset, batch_size=cfg.batch_size,
+            sampler=IterationSampler(len(self.trainset), self.start_step, max_steps, self.sample_seed),
+            generator=torch.Generator().manual_seed(self.sample_seed),
             num_workers=4, persistent_workers=True, pin_memory=True,
             collate_fn=skip_none_collate,
         )
@@ -1710,20 +1830,9 @@ class FreeTime4DRunner:
             # Phase determination (Vanilla FreeTimeGS - no static/dynamic split)
             # All Gaussians are 4D from step 0. Only difference is densification timing.
             in_settling = step < cfg.densification_start_step  # Steps 0-1000: settling
-            in_refinement = step >= cfg.densification_start_step  # Steps 1000+: refinement
-
-            # Velocity LR Annealing (from step 0, per paper's "Annealing Motion Scheduler")
-            # High LR initially to capture fast motion, decay for fine-tuning
-            progress = step / max(max_steps, 1)
-            vel_lr = cfg.velocity_lr_start * (cfg.velocity_lr_end / cfg.velocity_lr_start) ** progress
-            for pg in self.optimizers["velocities"].param_groups:
-                pg["lr"] = vel_lr * math.sqrt(cfg.batch_size)
-
-            # Times and durations: constant LR (no annealing needed)
-            for pg in self.optimizers["times"].param_groups:
-                pg["lr"] = cfg.times_lr * math.sqrt(cfg.batch_size)
-            for pg in self.optimizers["durations"].param_groups:
-                pg["lr"] = cfg.durations_lr * math.sqrt(cfg.batch_size)
+            policy = apply_phase(self, step)
+            in_refinement = step >= cfg.densification_start_step and policy.allow_relocation
+            vel_lr = self.optimizers["velocities"].param_groups[0]["lr"]
 
             # SH degree schedule
             sh_degree = min(step // cfg.sh_degree_interval, cfg.sh_degree)
@@ -1772,9 +1881,13 @@ class FreeTime4DRunner:
             ssim_loss = 1.0 - ssim_val
 
             # 3. LPIPS Loss (perceptual similarity) - paper: λperc=0.01
-            lpips_loss = self.lpips(colors_p, pixels_p) if cfg.lambda_perc > 0 else torch.tensor(0.0, device=device)
-            if cfg.lambda_perc > 0:
+            use_lpips = cfg.lambda_perc > 0 and step % policy.lpips_interval == 0
+            lpips_loss = self.lpips(colors_p, pixels_p) * policy.lpips_interval if use_lpips else colors.new_zeros(())
+            if use_lpips:
                 self.lpips.reset()
+
+            foreground_loss = (foreground_mse_loss(colors, pixels, data["alpha"].to(device))
+                               if policy.foreground_mse_weight > 0 else colors.new_zeros(()))
 
             # 4. 4D Regularization (paper: λreg=1e-2) - after initial settling
             # Lreg(t) = (1/N) * Σ(σ * sg[σ(t)]) - stop-gradient on temporal opacity
@@ -1802,7 +1915,8 @@ class FreeTime4DRunner:
             loss_dur_reg = cfg.lambda_duration_reg * duration_reg_loss
 
             # Total loss
-            loss = loss_img + loss_ssim + loss_lpips + loss_4d_reg + loss_dur_reg + cfg.lambda_alpha * alpha_loss
+            loss = (loss_img + loss_ssim + loss_lpips + loss_4d_reg + loss_dur_reg
+                    + cfg.lambda_alpha * alpha_loss + policy.foreground_mse_weight * foreground_loss)
 
             # Backward
             loss.backward()
@@ -1820,9 +1934,6 @@ class FreeTime4DRunner:
                 opt.zero_grad(set_to_none=True)
 
             self._project_temporal_params()
-
-            for sched in schedulers:
-                sched.step()
 
             # =====================================================================
             # IMPORTANT: Densification disabled until ROMA init settles!
@@ -1863,7 +1974,7 @@ class FreeTime4DRunner:
                         state=self.strategy_state,
                         step=step,
                         info=info,
-                        lr=schedulers[0].get_last_lr()[0],
+                        lr=self.optimizers["means"].param_groups[0]["lr"] * .01 ** (1 / self.lr_schedule_steps),
                     )
 
                 # Budget pruning (Pure Relocation mode) - after strategy step
@@ -1885,7 +1996,7 @@ class FreeTime4DRunner:
                             print(f"[Prune] Step {step}: removed {n_pruned}, remaining {len(self.splats['means'])}")
 
             # Progress bar (new phase names)
-            phase = "SETTLE" if in_settling else "REFINE"
+            phase = "SETTLE" if in_settling else ("REFINE" if in_refinement else "POLISH")
             pbar.set_description(
                 f"[{phase}] loss={loss.item():.4f} l1={l1_loss.item():.4f} "
                 f"t={t:.2f} N={len(self.splats['means'])} vel_lr={vel_lr:.1e}"
@@ -1899,6 +2010,7 @@ class FreeTime4DRunner:
 
                 # --- Total Loss ---
                 self.writer.add_scalar("loss/total", loss.item(), step)
+                self.writer.add_scalar("loss/foreground_mse", foreground_loss.item(), step)
 
                 # --- Individual Loss Components (raw values) ---
                 self.writer.add_scalar("loss/l1_raw", l1_loss.item(), step)
@@ -1961,7 +2073,7 @@ class FreeTime4DRunner:
 
                 # --- Phase Indicator (for visualization) ---
                 # 0 = Settling (ROMA init settling), 1 = Refinement (densification active)
-                phase_num = 0 if in_settling else 1
+                phase_num = 0 if in_settling else (1 if in_refinement else 2)
                 self.writer.add_scalar("train/phase", phase_num, step)
 
             # --- Image Logging (every tb_image_every steps) ---
@@ -2031,14 +2143,7 @@ class FreeTime4DRunner:
                 with open(f"{self.stats_dir}/train_step{step:04d}.json", "w") as f:
                     json.dump(stats, f)
 
-                data = {
-                    "step": step,
-                    "use_velocity": cfg.use_velocity,
-                    "n_frames": cfg.end_frame - cfg.start_frame,
-                    "splats": self.splats.state_dict(),
-                    "optimizers": {k: v.state_dict() for k, v in self.optimizers.items()},
-                }
-                torch.save(data, f"{self.ckpt_dir}/ckpt_{step}.pt")
+                torch.save(self.checkpoint(step), f"{self.ckpt_dir}/ckpt_{step}.pt")
 
                 if self.world_rank == 0:
                     try:
@@ -2326,6 +2431,8 @@ class FreeTime4DRunner:
             path = save_ftgs_ply(
                 os.path.join(cfg.result_dir, f"ckpt_{step}.ftgs.ply"), self.splats,
                 use_velocity=cfg.use_velocity, n_frames=cfg.end_frame - cfg.start_frame,
+                min_duration=self.duration_bounds[0],
+                max_duration=self.duration_bounds[1],
             )
             print(f"[FTGS Export] Saved {len(self.splats['means']):,} Gaussians to {path}")
         elif cfg.export_ply_compact:

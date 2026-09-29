@@ -10,7 +10,10 @@ from typing import Mapping
 import numpy as np
 import torch
 
-from freetime_ops import MIN_DURATION, validate_vanilla_checkpoint
+from freetime_ops import (
+    MIN_DURATION, validate_vanilla_checkpoint, validate_duration_bounds,
+    checkpoint_duration_bounds,
+)
 
 
 @torch.no_grad()
@@ -20,6 +23,8 @@ def save_ftgs_ply(
     *,
     use_velocity: bool = True,
     n_frames: int | None = None,
+    min_duration: float = MIN_DURATION,
+    max_duration: float | None = None,
     chunk_size: int = 65536,
 ) -> Path:
     """Write all Gaussians and SH bands without per-frame filtering.
@@ -40,6 +45,7 @@ def save_ftgs_ply(
         raise ValueError("chunk_size must be positive")
     if n_frames is not None and n_frames < 1:
         raise ValueError("n_frames must be positive")
+    min_duration, max_duration = validate_duration_bounds(min_duration, max_duration)
     validate_vanilla_checkpoint({"splats": splats})
 
     n = len(splats["means"])
@@ -71,7 +77,7 @@ def save_ftgs_ply(
     comments = [
         "ftgs_version 1", "time_units normalized",
         f"sh_degree {bands - 1}", f"use_velocity {int(use_velocity)}",
-        f"min_duration {MIN_DURATION}", "opacity_floor 0.0001",
+        f"min_duration {min_duration}", "opacity_floor 0.0001",
     ]
     if n_frames is not None:
         comments.append(f"n_frames {int(n_frames)}")
@@ -106,7 +112,10 @@ def save_ftgs_ply(
                 rows[:, end_sh + 1:end_sh + 4] = arrays["scales"]
                 rows[:, end_sh + 4:end_sh + 8] = arrays["quats"]
                 rows[:, end_sh + 8] = arrays["times"][:, 0]
-                rows[:, end_sh + 9] = np.maximum(arrays["durations"][:, 0], math.log(MIN_DURATION))
+                rows[:, end_sh + 9] = np.clip(
+                    arrays["durations"][:, 0], math.log(min_duration),
+                    None if max_duration is None else math.log(max_duration),
+                )
                 rows[:, end_sh + 10:end_sh + 13] = arrays["velocities"]
                 file.write(rows.tobytes())
         os.replace(temp_path, path)
@@ -126,11 +135,13 @@ def export_checkpoint(
     """Export on CPU without constructing a trainer or loading the dataset."""
     checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     validate_vanilla_checkpoint(checkpoint)
+    minimum, maximum = checkpoint_duration_bounds(checkpoint)
     path = save_ftgs_ply(
         output_path if output_path is not None else Path(ckpt_path).with_suffix(".ftgs.ply"),
         checkpoint["splats"],
         n_frames=n_frames if n_frames is not None else checkpoint.get("n_frames"),
         use_velocity=use_velocity if use_velocity is not None else checkpoint.get("use_velocity", True),
+        min_duration=minimum, max_duration=maximum,
     )
     print(f"Saved {len(checkpoint['splats']['means']):,} Gaussians to {path}")
     return path

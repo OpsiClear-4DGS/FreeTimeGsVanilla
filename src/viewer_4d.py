@@ -30,7 +30,7 @@ from gsplat.rendering import rasterization
 import nerfview
 
 
-from freetime_ops import MIN_DURATION, temporal_opacity, positions_at_time, validate_vanilla_checkpoint
+from freetime_ops import temporal_opacity, positions_at_time, validate_vanilla_checkpoint, checkpoint_duration_bounds
 
 
 @dataclass
@@ -75,6 +75,7 @@ class Splats4D:
         # Load on CPU first to avoid CUDA init issues, then move to device
         ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         validate_vanilla_checkpoint(ckpt)
+        minimum, maximum = checkpoint_duration_bounds(ckpt)
         self.use_velocity = bool(ckpt.get("use_velocity", True))
         cfg.total_frames = int(ckpt.get("n_frames", cfg.total_frames))
         splats = ckpt["splats"]
@@ -89,7 +90,9 @@ class Splats4D:
 
         # 4D parameters
         self.times = splats["times"].to(cfg.device)  # [N, 1] - canonical times
-        self.durations = splats["durations"].to(cfg.device).clamp_min(np.log(MIN_DURATION))  # [N, 1] - temporal durations (log)
+        self.durations = splats["durations"].to(cfg.device).clamp(
+            min=math.log(minimum), max=None if maximum is None else math.log(maximum),
+        )  # [N, 1] - temporal durations (log)
         self.velocities = splats["velocities"].to(cfg.device)  # [N, 3] - velocities
 
         self.n_gaussians = self.means.shape[0]

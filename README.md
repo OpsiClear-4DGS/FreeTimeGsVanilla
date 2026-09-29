@@ -36,6 +36,63 @@ This independently implemented PyTorch loss follows the transparent-alpha
 approach in [Brush](https://github.com/ArthurBrussee/brush/tree/6378a76add3b93501abb55c2dc08d71688537679),
 with uniform random background colors in [0, 1]. No Brush code is bundled.
 
+## Training policy
+
+Temporal duration is Gaussian **sigma**, rather than a hard visibility cutoff.
+`--min-duration-frames` and `--max-duration-frames` express sigma bounds in source
+frames, converted with `max(end_frame - start_frame - 1, 1)`. The default retains
+the legacy normalized minimum of 0.02 and no maximum. Checkpoints record the
+resolved bounds; checkpoint loading, the native viewer, FTGS PLY and TSOG input
+conversion preserve them. A half-frame minimum therefore remains a half frame
+when exporting a 121-frame sequence, instead of widening to 2.4 frames.
+
+`--freeze-times` anchors temporal centers while velocities remain learnable.
+`--lambda-foreground` adds image-area-independent RGB MSE over target alpha > 0.5
+in transparent mode. It supplements full-image RGB and alpha supervision; it
+does not remove background errors. Empty foreground masks contribute zero.
+`--lpips-interval N` evaluates LPIPS every N iterations with weight multiplied
+by N. This changes the optimization trajectory, so sparse LPIPS should be
+evaluated as a recipe choice rather than assumed equivalent to dense LPIPS.
+
+The Python API supports explicit phases. Each phase inherits fields it does not
+specify; learning-rate factors multiply the current continuous schedule. Adam
+momentum is retained, and frozen parameters receive no optimizer updates.
+Setting `allow_relocation=False` stops relocation, densification and pruning
+during polishing. For example:
+
+```python
+from simple_trainer_freetime_4d_pure_relocation import Config
+from training_policy import TrainingPhase
+
+cfg = Config(
+    alpha_mode="transparent", random_bkgd=True,
+    freeze_times=True, lambda_foreground=1.0,
+    phases=[TrainingPhase(
+        start_step=24_000,
+        freeze_durations=True, allow_relocation=False,
+        position_lr_factor=0.25, velocity_lr_factor=0.2,
+        appearance_lr_factor=0.25, lpips_interval=4,
+    )],
+)
+```
+
+This illustrates the API, not a validated universal preset. Narrow temporal
+widths require compatible temporal seed coverage. In particular, reducing
+sigma while keeping widely spaced keyframes can leave unsupported intermediate
+frames. Initialization and recipe selection belong to the calling pipeline;
+FreeTimeGsVanilla supplies the reusable optimization controls.
+
+New checkpoints retain the training policy, Adam state, fixed learning-rate
+horizon, allocation statistics, strategy state and Python/NumPy/Torch RNG state.
+Iteration sampling uses a separate RNG and the consumed iteration number, so
+DataLoader prefetch cannot advance resumed sampling. `--resume-mode resume`
+restores this policy, including when extending `--max-steps`; the frame range,
+alpha mode, image factor and LPIPS network must match. Use
+`--resume-mode finetune` for a new recipe and fresh Adam states at step zero.
+Legacy checkpoints retain their original 0.02 duration interpretation and can
+load model/Adam state, but cannot recover training state they never recorded.
+CUDA rasterization may produce small numerical differences after restart.
+
 ## Installation
 
 Use Python 3.12+, a CUDA-capable PyTorch environment, and a CUDA toolkit for the

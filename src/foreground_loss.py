@@ -32,3 +32,17 @@ def composite_foreground(
     predicted = rendered_rgb + (1 - rendered_alpha) * background
     target = target_rgb * target_alpha + (1 - target_alpha) * background
     return predicted, target, F.l1_loss(rendered_alpha, target_alpha)
+
+
+def foreground_mse_loss(predicted: Tensor, target: Tensor, target_alpha: Tensor) -> Tensor:
+    """Mean RGB squared error over target alpha > 0.5, independent of image area.
+
+    This is additional foreground supervision. Full-image RGB and alpha losses
+    still penalize floaters outside the mask. Empty masks contribute zero.
+    """
+    if predicted.shape != target.shape or predicted.shape[-1] != 3:
+        raise ValueError("Foreground RGB must share an NHWC raster")
+    if target_alpha.shape != (*target.shape[:-1], 1):
+        raise ValueError("Foreground alpha must align with RGB")
+    mask = target_alpha > .5
+    return ((predicted - target).square() * mask).sum() / (3 * mask.sum()).clamp_min(1)

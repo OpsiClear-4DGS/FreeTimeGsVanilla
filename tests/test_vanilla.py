@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from datasets.FreeTime_dataset import _detect_image_format, find_available_colmap_frames
 import combine_frames_fast_keyframes as combiner
-from freetime_ops import MIN_DURATION, SPLAT_KEYS, regularization_4d, temporal_opacity, validate_vanilla_checkpoint
+from freetime_ops import MIN_DURATION, SPLAT_KEYS, duration_bounds, regularization_4d, temporal_opacity, validate_vanilla_checkpoint
 from init_common import apply_scene_transform, read_init_arrays
 import simple_trainer_freetime_4d_pure_relocation as trainer
 from video_io import MP4Writer
@@ -53,6 +53,10 @@ def make_runner(cfg=None, n=8):
     runner.scene_scale = 2.0
     runner.world_rank = 0
     runner.start_step = 0
+    runner.duration_bounds = duration_bounds(cfg.end_frame - cfg.start_frame, cfg.min_duration_frames, cfg.max_duration_frames)
+    runner.lr_schedule_steps = cfg.lr_schedule_steps or cfg.max_steps
+    runner.sample_seed = 42
+    runner.strategy_state = cfg.strategy.initialize_state(scene_scale=runner.scene_scale)
     initial = dict(
         positions=torch.arange(n * 3, dtype=torch.float32).reshape(n, 3) * 0.01,
         velocities=torch.full((n, 3), 0.02),

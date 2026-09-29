@@ -1,4 +1,8 @@
-# Packaged TSOG support
+# Packaged TSOG guide
+
+**Format implementers:** use [TSOG Playback Profile 1](TSOG-SPEC.md), the normative
+specification, [JSON Schema](tsog.schema.json), and
+[conformance corpus](tests/fixtures/tsog/CONFORMANCE.md). This guide covers usage.
 
 Drop one `.tsog` file into the player, choose it with the file button, or use
 `?src=path/to/scene.tsog`. Both embedding APIs accept the same file through
@@ -7,9 +11,15 @@ Drop one `.tsog` file into the player, choose it with the file button, or use
 directories and standalone `meta.json` files are not player inputs.
 
 The repository maintains its own browser decoder in [tsog.js](tsog.js), with
-[zip.js](zip.js) for packaging and [webp.js](webp.js) for byte-exact attribute
-images. It uses native browser WebP decoding and WebGL2, without a runtime
+[zip.js](zip.js) for reading archives, [tsog-package.js](tsog-package.js) for
+packaging, and [webp.js](webp.js) for byte-exact attribute images. It uses native
+browser WebP decoding and WebGL2, without a runtime
 package dependency. Existing `.ftgs.ply` loading remains available.
+
+For playback, start with the [player README](README.md). For packaging, see
+[audio and playback metadata](#audio-and-playback-metadata) and the
+[command examples](#add-audio-or-change-defaults). For integration, use the
+[canvas and iframe APIs](API.md).
 
 ## Original work and licensing
 
@@ -43,29 +53,50 @@ repository license.
 
 ## Audio and playback metadata
 
-This player adds two **optional root fields** to `meta.json`. These are local
-player extensions, not fields defined by the original TSOG exporter or SOG
-specification. The package still uses TSOG version 4, and its Gaussian images
-are unchanged. Files without these fields retain the defaults described below.
+This player adds two **optional root fields** to `meta.json`, defined by
+[TSOG Playback Profile 1](TSOG-SPEC.md). These are this repository's additions,
+not fields defined by the original TSOG exporter or SOG specification. New
+packages include the profile declaration below. The base version remains 4 and
+Gaussian images are unchanged. Legacy files without a declaration remain
+readable; files without playback/audio fields retain the defaults below.
 
 ```json
 {
+  "profile": { "id": "org.opsiclear.tsog-playback", "version": 1 },
   "playback": { "duration": 10, "fps": 30, "rate": 1, "loop": true },
   "audio": { "file": "audio/track.mp3", "mimeType": "audio/mpeg", "volume": 0.8 }
 }
 ```
 
 Add these fields alongside the existing `version`, `count`, and attributes.
+Omit `audio` entirely when there is no track. The JSON above is a metadata
+fragment, not a complete scene. An audio-enabled package has this structure:
+
+```text
+scene.tsog (ZIP)
+├── meta.json
+├── *.webp          # Attribute images named by the existing metadata
+└── audio/
+    └── track.mp3   # Optional; audio.file identifies this entry
+```
 
 | Field | Meaning / default |
 | --- | --- |
 | `playback.duration` | Positive clip length in seconds at 1× speed. Optional for animation; required for a static scene with audio. |
-| `playback.fps` | Positive display frame rate; falls back to the existing top-level `fps`, then 30. |
+| `playback.fps` | Positive display frame rate; falls back to the existing top-level `fps`, then 30. Discrete `duration` determines FPS as described below. |
 | `playback.rate` | Speed multiplier from 0.25 to 4; default 1. |
 | `playback.loop` | Whether to repeat the entire clip; default true. |
 | `audio.file` | Required when `audio` is present: one file inside the same ZIP. External URLs and traversal paths are rejected. |
 | `audio.mimeType` | Audio MIME type; inferred from a known filename extension if omitted. |
 | `audio.volume` | Initial volume from 0 to 1; default 1. |
+
+### Settings and timing
+
+The speed multiplier is named `playback.rate` in the file, `--speed` in the
+packaging command, `speed` in the page URL, and `playbackRate` or
+`setPlaybackRate()` in the canvas API. These all control the same setting.
+Explicit player options take priority over file defaults. Speed, mute and
+volume setters persist across later loads; changing controls does not edit the file.
 
 For continuous scenes, duration and FPS establish the display frame count as
 `round(duration * fps) + 1` (at least two); duration remains exact. For discrete
@@ -73,6 +104,11 @@ scenes, duration implies `fps = N / duration`. If both `playback.duration` and
 `playback.fps` are present, they must agree with `N`. Explicit player `fps` or
 continuous `frames` overrides recalculate the animation duration using that
 frame count. A static scene keeps its declared duration.
+
+For the continuous ten-second, 30-fps example above, `?speed=2` keeps the
+duration at ten media seconds and plays it in five seconds. `?fps=60` instead
+changes its base duration to five media seconds while retaining 301 display
+frames. Use `speed` for a playback-speed override that keeps scene/audio alignment.
 
 Speed changes advance scene time and audio together. `duration` and
 `currentTime` always refer to media seconds: a ten-second clip at 2× takes five
@@ -95,7 +131,12 @@ time. The API exposes `audio.status` and `audiochange` for custom controls. See
 
 ### Add audio or change defaults
 
-The dependency-free packaging command uses Node.js 22 or newer:
+The dependency-free packaging command uses Node.js 22 or newer and starts from
+an existing TSOG version-4 archive. It neither converts `.ftgs.ply` files nor
+encodes Gaussian attributes. In FreeTimeGsVanilla, run the commands below from
+`player/`; in the standalone player repo, run them from the repository root.
+
+For a continuous animation:
 
 ```bash
 node tools/package-tsog.mjs scene.tsog scene-with-audio.tsog \
@@ -107,6 +148,44 @@ Use `--no-loop` for a clip that stops at its end. Unspecified defaults and other
 metadata are retained; the tool copies the attribute images without encoding
 them again. Output must end in `.tsog`; existing output files are never
 overwritten. Run `--help` for the options. Use a new output filename for changes.
+Every output declares profile version 1. An unsupported profile ID or version
+is rejected instead of silently downgrading it.
+
+| Flag | Effect |
+| --- | --- |
+| `--audio PATH` | Embed or replace one track. Its known extension determines the audio MIME type. |
+| `--remove-audio` | Remove the audio entry and its metadata; cannot be combined with `--audio`. |
+| `--duration SECONDS` | Set `playback.duration` at normal speed. |
+| `--fps FPS` | Set `playback.fps`; discrete duration and FPS must agree with the native frame count. |
+| `--speed RATE` | Set `playback.rate` from 0.25 to 4. |
+| `--loop` / `--no-loop` | Set `playback.loop` to true or false. |
+| `--volume LEVEL` | Set `audio.volume` from 0 to 1; requires a new or existing track. |
+| `--help` | Show command usage. |
+
+Change speed and looping while preserving the current audio, or create a silent
+copy of the result:
+
+```bash
+node tools/package-tsog.mjs scene-with-audio.tsog scene-slower.tsog \
+  --speed 0.5 --no-loop
+node tools/package-tsog.mjs scene-slower.tsog scene-silent.tsog --remove-audio
+```
+
+For a **discrete sequence with 240 frames**, a ten-second clip requires 24 fps:
+
+```bash
+node tools/package-tsog.mjs sequence-240.tsog sequence-with-audio.tsog \
+  --audio soundtrack.mp3 --duration 10 --fps 24
+```
+
+If a discrete package already declares a duration, changing its FPS also
+requires a matching duration. For a **static scene**, supply a duration so the
+player can run a timed soundtrack:
+
+```bash
+node tools/package-tsog.mjs still.tsog still-with-audio.tsog \
+  --audio narration.mp3 --duration 30 --no-loop
+```
 
 The same operation is available to browser projects and Node.js:
 
@@ -121,12 +200,46 @@ const result = await packageTSOG(sceneBlob, {
 // Download result as a .tsog file, or pass the Blob directly to player.load().
 ```
 
+`packageTSOG()` resolves to a Blob. It merges the supplied `playback` fields
+with existing defaults. Omitted `audio` retains the track; `audio: null` removes
+it. A File's known extension determines its MIME type; a filename-free Blob
+needs an `audio/*` type. The API does not transcode audio or infer scene duration
+from a soundtrack. Save the result with a `.tsog` extension. The input Blob and
+the source file remain unchanged.
+
 The built-in controls include playback speed, mute (M), and a volume slider on
 desktop. Explicit constructor/query settings and API setters override file
 defaults. Setters persist across subsequent loads. Query parameters are
 `speed`, `loop=0|1`, `muted=0|1`, and `volume` alongside the existing timing
 options. Both canvas and iframe APIs expose `setPlaybackRate`, `setMuted`, and
 `setVolume`; see [API.md](API.md).
+
+### Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Animation plays without sound | Click **Enable audio**, check mute/volume, and inspect `state.audio.status`. A codec error means the browser could not decode the track. |
+| Duration or speed differs from the file | Remove explicit `fps`, `frames`, `speed`, or constructor overrides as appropriate. A rate set through the API also persists across loads. |
+| A static scene with audio is rejected | Set a positive `playback.duration` with `--duration`. |
+| Discrete timing is rejected | Ensure `playback.duration * playback.fps` equals `timeline.N`, including any values retained from the input file. |
+| Packaging reports that output exists | Choose a new output path; the command never overwrites an existing file. |
+
+## Validate a package
+
+From the player directory, with Node.js 22+:
+
+```bash
+node tools/validate-tsog.mjs scene.tsog --require-profile
+node tools/validate-tsog.mjs scene.tsog --json
+```
+
+Omit `--require-profile` to accept legacy v4 packages without a declaration.
+The command checks metadata, derived timing, referenced ZIP entries and
+checksums, lossless WebP headers/dimensions, and audio presence/size. It reports
+its scope as `container`: it does not decode image pixels or audio codecs.
+Exit status is 0 on success and 1 on failure. For exhaustive attribute checks,
+use the browser validation API and synthetic examples in the
+[specification](TSOG-SPEC.md#10-validation-and-conformance-examples).
 
 ## Compatibility
 
@@ -148,14 +261,15 @@ For continuous models, opacity is `alpha * exp(-0.5 * ((t - center) / scale)^2)`
 and position is `position + velocity * (t - center)`. Temporal scale is a linear
 standard deviation, not a log value. This player uses normalized scene time
 `[0, 1]`; the original continuous exporter does not include a whole-clip duration.
-Without playback metadata, playback defaults to 300 display frames at 30 fps. Set `?frames=120&fps=24`
-or the canvas constructor's `frames` and `fps` to choose the playback duration.
+Without playback metadata, playback defaults to 300 display frames at 30 fps.
+Set `?frames=120&fps=24` or the canvas constructor's `frames` and `fps` to choose
+the playback duration.
 Files using a different global time unit need conversion before playback.
 
 For discrete models, only the selected frame is visible. No cross-frame fade or
-motion is applied. The package's `N` sets the frame count and `fps` sets the
-playback speed (30 if absent). An explicit player `fps` overrides that speed;
-`frames` does not override a discrete timeline. Duration is `N / fps`, including
+motion is applied. The package's `N` sets the frame count; playback metadata or
+the legacy top-level `fps` sets the native frame rate (30 if absent). An explicit
+player `fps` overrides that rate; `frames` does not override a discrete timeline. Duration is `N / fps`, including
 a full final-frame interval. `seek(t)` remains normalized and selects
 `min(N - 1, floor(t * N))`; `seek(1)` displays the last frame. Static files stay
 paused unless `playback.duration` supplies a timed presentation.

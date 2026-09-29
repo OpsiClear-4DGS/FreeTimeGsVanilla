@@ -49,6 +49,8 @@ def main():
               const {readModel} = await import('./model.js');
               const {tsogRow} = await import('./tests/tsog-source.mjs');
               const {covarianceFromQuaternion} = await import('./ftgs.js');
+              const {validateTSOGPackage} = await import('./tsog-validate.js');
+              const {packageTSOG} = await import('./tsog-package.js');
               const path = './tests/fixtures/tsog/';
               const hashes = await (await fetch(path + 'image-hashes.json')).json();
               let imageCount = 0;
@@ -62,6 +64,12 @@ def main():
                 const blob = await (await fetch(path + name)).blob();
                 const archive = await openZip(blob), images = new AttributeImages();
                 try {
+                  const report = await validateTSOGPackage(await packageTSOG(blob), {
+                    requireProfile: true,
+                    decodeImage: (bytes, signal) => images.decode(bytes, signal),
+                  });
+                  check(report.level === 'attributes' && report.count === 256 && !report.legacy,
+                    name + ' exhaustive profile validation');
                   for (const [file, expected] of Object.entries(entries)) {
                     const image = await images.decode(await archive.read(file));
                     check(image.width === expected.width && image.height === expected.height, file + ' dimensions');

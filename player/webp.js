@@ -1,5 +1,36 @@
 // Attribute images carry integer codes, including in RGB when alpha is small.
 // A 2D canvas would round those codes through premultiplied alpha.
+// Inspect the container without decoding pixels (also usable from Node.js).
+export function inspectAttributeImage(bytes) {
+  const fail = () => { throw new Error("Invalid TSOG: expected a still lossless WebP attribute image."); };
+  const tag = (offset) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
+  if (bytes.length < 25 || tag(0) !== "RIFF" || tag(8) !== "WEBP") fail();
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(4, true) + 8 !== bytes.length) fail();
+  let dimensions, canvas;
+  for (let offset = 12; offset < bytes.length;) {
+    if (offset + 8 > bytes.length) fail();
+    const type = tag(offset), size = view.getUint32(offset + 4, true);
+    const start = offset + 8, end = start + size;
+    if (end + (size & 1) > bytes.length) fail();
+    if (["VP8 ", "ANIM", "ANMF", "ALPH"].includes(type)) fail();
+    if (type === "VP8L") {
+      if (dimensions || size < 5 || bytes[start] !== 0x2f) fail();
+      const bits = view.getUint32(start + 1, true);
+      if (bits >>> 29) fail();
+      dimensions = { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+    } else if (type === "VP8X") {
+      if (canvas || offset !== 12 || size !== 10 || (bytes[start] & 0xc3) ||
+          bytes[start + 1] || bytes[start + 2] || bytes[start + 3]) fail();
+      const uint24 = (i) => bytes[i] + 256 * bytes[i + 1] + 65536 * bytes[i + 2];
+      canvas = { width: uint24(start + 4) + 1, height: uint24(start + 7) + 1 };
+    }
+    offset = end + (size & 1);
+  }
+  if (!dimensions || (canvas && (canvas.width !== dimensions.width || canvas.height !== dimensions.height))) fail();
+  return dimensions;
+}
+
 export class AttributeImages {
   #gl;
   #texture;
@@ -7,6 +38,7 @@ export class AttributeImages {
 
   async decode(bytes, signal) {
     signal?.throwIfAborted();
+    inspectAttributeImage(bytes);
     const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/webp" }), {
       premultiplyAlpha: "none", colorSpaceConversion: "none", imageOrientation: "none",
     });

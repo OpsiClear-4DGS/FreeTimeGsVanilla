@@ -112,14 +112,34 @@ export async function openZip(blob, signal) {
         header.getUint16(6, true) !== entry.flags
       )
         fail(`invalid local header for '${name}'.`);
+      const streamed = Boolean(entry.flags & 8);
+      if (
+        header.getUint32(14, true) !== (streamed ? 0 : entry.crc) ||
+        header.getUint32(18, true) !== (streamed ? 0 : entry.packed) ||
+        header.getUint32(22, true) !== (streamed ? 0 : entry.unpacked)
+      )
+        fail(`inconsistent local CRC or size for '${name}'.`);
       const nameSize = header.getUint16(26, true);
-      const localName = new TextDecoder().decode(
+      const localName = new TextDecoder("utf-8", { fatal: true }).decode(
         await read(entry.local + 30, nameSize),
       );
       if (localName !== name) fail(`mismatched local filename for '${name}'.`);
       const dataOffset =
         entry.local + 30 + nameSize + header.getUint16(28, true);
       if (dataOffset + entry.packed > offset) fail(`truncated '${name}'.`);
+      if (streamed) {
+        const end = dataOffset + entry.packed;
+        const size = Math.min(16, offset - end);
+        if (size < 12) fail(`missing data descriptor for '${name}'.`);
+        const descriptor = new DataView((await read(end, size)).buffer);
+        const matches = (start) => size >= start + 12 &&
+          descriptor.getUint32(start, true) === entry.crc &&
+          descriptor.getUint32(start + 4, true) === entry.packed &&
+          descriptor.getUint32(start + 8, true) === entry.unpacked;
+        // The signature is optional; a signature-less CRC may equal it.
+        if (!matches(0) && !(descriptor.getUint32(0, true) === 0x08074b50 && matches(4)))
+          fail(`invalid data descriptor for '${name}'.`);
+      }
       let bytes;
       if (entry.method === 0) {
         if (entry.packed !== entry.unpacked)

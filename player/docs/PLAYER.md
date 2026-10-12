@@ -1,7 +1,7 @@
 # FTGS Player
 
 A minimal browser player for animated Vanilla `.ftgs.ply` and packaged `.tsog` files.
-Rendering uses native WebGL2, with depth sorting in a Web Worker. It runs directly as a static
+Rendering uses native WebGL2, with decoding and depth sorting in Web Workers. It runs directly as a static
 site without runtime dependencies.
 
 **[Open the player](https://opsiclear-4dgs.github.io/ftgs-player/)** ·

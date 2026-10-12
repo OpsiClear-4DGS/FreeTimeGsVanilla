@@ -1,4 +1,5 @@
-import { readModel } from "./model.js";
+import { readModelInWorker } from "./decode.js";
+import { createModuleWorker } from "./worker.js";
 import { OrbitCamera, validateCameraView } from "./camera.js";
 import { SplatRenderer } from "./renderer.js";
 import { ARPresentation, isARSupported } from "./xr.js";
@@ -28,14 +29,7 @@ const owners = new WeakMap();
 const aborted = () => new DOMException("Loading was cancelled.", "AbortError");
 
 function createSortWorker() {
-  try {
-    return new Worker(new URL("./sort-worker.js", import.meta.url), { type: "module" });
-  } catch (error) {
-    if (error.name !== "SecurityError") throw error;
-  }
-  // Opaque iframe origins need an opaque module bootstrap for the CORS import.
-  const script = `import ${JSON.stringify(new URL("./sort-worker.js", import.meta.url).href)};`;
-  return new Worker(`data:text/javascript,${encodeURIComponent(script)}`, { type: "module" });
+  return createModuleWorker(new URL("./sort-worker.js", import.meta.url));
 }
 
 /** A self-contained canvas player. No UI, global shortcuts, or document styles. */
@@ -310,7 +304,7 @@ export class FTGSPlayer extends EventTarget {
         throw new TypeError("name must be a string.");
       // Validate a saved view before replacing a working model or camera.
       if (view !== null) view = validateCameraView(view);
-      const data = await readModel(blob, {
+      const data = await readModelInWorker(blob, {
         maxPoints: this.#options.maxPoints,
         signal: controller.signal,
         onProgress: (progress) => {

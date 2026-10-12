@@ -53,7 +53,11 @@ export class AttributeImages {
         const canvas = typeof OffscreenCanvas === "function"
           ? new OffscreenCanvas(1, 1) : document.createElement("canvas");
         this.#gl = canvas.getContext("webgl2", { antialias: false, depth: false });
-        if (!this.#gl) throw new Error("WebGL2 is required to decode TSOG attribute images.");
+        if (!this.#gl) {
+          const error = new Error("WebGL2 is required to decode TSOG attribute images.");
+          error.code = "TSOG_WEBGL_UNAVAILABLE";
+          throw error;
+        }
         this.#texture = this.#gl.createTexture();
         this.#framebuffer = this.#gl.createFramebuffer();
       }

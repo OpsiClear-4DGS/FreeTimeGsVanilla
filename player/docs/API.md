@@ -143,7 +143,7 @@ Subscribe with `addEventListener`. Every event's `detail` contains a state snaps
 `error`, `arstatechange`, `audiochange`, `ratechange`, and `destroy`. Playback time
 events are limited to about ten per second; explicit seeks emit immediately. `ended` fires when playback stops with looping
 disabled. Hiding the desktop document pauses playback. `destroy()` ends AR,
-cancels downloads, terminates the sorting worker, removes internal listeners
+cancels downloads, terminates decoding and sorting workers, removes internal listeners
 and resize observers,
 stops animation, and releases GPU resources. Your canvas remains in the DOM and
 can be reused by a new player.
@@ -344,7 +344,7 @@ export function FTGSCanvas({ source }) {
 
 Vue and other frameworks can use the same mount/destroy lifecycle. For direct
 canvas hosting, retain the whole `src/` directory, or let your bundler process its module and worker URLs. Self-host these modules with your application so the module
-worker can load from the same origin. WebGL2 and adequate GPU memory are required.
+workers can load from the same origin. WebGL2 and adequate GPU memory are required.
 
 Use `src/tsog-package.js` or the package’s `@opsiclear/ftgs-player/package` export as well if your application will package audio or save
 playback metadata. It uses the shared TSOG and ZIP modules; the Node CLI in

@@ -16,6 +16,7 @@ parser.add_argument('--capture', action='store_true', help='Hash every logical c
 parser.add_argument('--compare', type=Path, help='Require exact attribute and frame hashes from a captured baseline')
 parser.add_argument('--browser', help='Existing Chromium executable')
 parser.add_argument('--example', default='examples/assets/jensen-2m.json', help='Example manifest path or URL, relative to the served project root')
+parser.add_argument('--main-thread', action='store_true', help='Benchmark the direct decoder for comparison with worker loading')
 args = parser.parse_args()
 if args.runs < 1: parser.error('--runs must be positive')
 if args.compare: args.capture = True
@@ -28,12 +29,13 @@ class Handler(SimpleHTTPRequestHandler):
         else: super().do_GET()
 server = ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=str(args.root)))
 threading.Thread(target=server.serve_forever, daemon=True).start()
-script = r'''async ({capture, example}) => {
+script = r'''async ({capture, example, mainThread}) => {
   const {readModel} = await import('/src/model.js');
+  const {readModelInWorker} = await import('/src/decode.js');
   const {AttributeImages} = await import('/src/webp.js');
   const {SplatRenderer} = await import('/src/renderer.js');
   const {OrbitCamera} = await import('/src/camera.js');
-  const {sortVisible} = await import('/src/sort.js');
+  const {createSorter} = await import('/src/sort.js');
   const metadataURL = new URL(example, location.origin + '/');
   const metadata = await (await fetch(metadataURL)).json();
   let start = performance.now();
@@ -54,7 +56,7 @@ script = r'''async ({capture, example}) => {
   const stages = [];
   start = performance.now();
   let previous = start;
-  const data = await readModel(blob, {maxPoints:Infinity, onProgress(progress) {
+  const data = await (mainThread ? readModel : readModelInWorker)(blob, {maxPoints:Infinity, onProgress(progress) {
     const now = performance.now(); stages.push({progress,ms:now-previous});previous=now;
   }});
   const decodeMs = performance.now()-start;
@@ -77,13 +79,23 @@ script = r'''async ({capture, example}) => {
   const camera = new OrbitCamera(canvas, () => {});
   camera.fit(data.bounds); camera.restore(metadata.view);
   start = performance.now();
-  const order = sortVisible(data, 0, camera.snapshot().view);
+  const sort = createSorter(data);
+  const sortPrepareMs = performance.now()-start;
+  start = performance.now();
+  const order = sort(0, camera.snapshot().view);
   const sortMs = performance.now()-start;
   start = performance.now();
   renderer.draw(order, camera.snapshot(), 0, data.degree);
   renderer.gl.finish();
   const drawMs = performance.now()-start;
-  const result = {downloadMs, decodeMs, uploadMs, sortMs, drawMs, maxHeartbeatGapMs, cpuBytes, decodeUploadMs:decodeMs+uploadMs, visiblePoints:order.length, gpuUploadBytes:gpuBytes.reduce((a,b)=>a+b,0), stages, images, count:data.count, coefficients:data.coefficients, harmonicPointCount:data.harmonicPointCount ?? 0};
+  const warmSortTimes=[];
+  for(let i=0;i<14;i++) {
+    start=performance.now();
+    sort((i%7)/6,camera.snapshot().view);
+    warmSortTimes.push(performance.now()-start);
+  }
+  const warmSortMs=warmSortTimes.toSorted((a,b)=>a-b)[7];
+  const result = {decoder:mainThread?'direct':'worker', downloadMs, decodeMs, uploadMs, sortPrepareMs, sortMs, warmSortMs, drawMs, maxHeartbeatGapMs, cpuBytes, decodeUploadMs:decodeMs+uploadMs, visiblePoints:order.length, gpuUploadBytes:gpuBytes.reduce((a,b)=>a+b,0), stages, images, count:data.count, coefficients:data.coefficients, harmonicPointCount:data.harmonicPointCount ?? 0};
   if (capture) {
     const hash = async buffer => [...new Uint8Array(await crypto.subtle.digest('SHA-256', buffer))].map(v=>v.toString(16).padStart(2,'0')).join('');
     result.hashes = {};
@@ -99,7 +111,7 @@ script = r'''async ({capture, example}) => {
     result.hashes.sh = await hash(sh);
     result.frames = [];
     for (const time of [.15,.7]) {
-      renderer.draw(sortVisible(data,time,camera.snapshot().view), camera.snapshot(), time, data.degree);
+      renderer.draw(sort(time,camera.snapshot().view), camera.snapshot(), time, data.degree);
       const rgba = new Uint8Array(canvas.width*canvas.height*4);
       renderer.gl.readPixels(0,0,canvas.width,canvas.height,renderer.gl.RGBA,renderer.gl.UNSIGNED_BYTE,rgba);
       result.frames.push({time, sha256:await hash(rgba)});
@@ -115,11 +127,11 @@ try:
         for i in range(args.runs):
             page=browser.new_page(viewport={'width':640,'height':480})
             page.goto(f'http://127.0.0.1:{server.server_port}/__benchmark__')
-            result=page.evaluate(script, {'capture':args.capture and i==0, 'example':args.example})
+            result=page.evaluate(script, {'capture':args.capture and i==0, 'example':args.example, 'mainThread':args.main_thread})
             runs.append(result)
             print(json.dumps({'run':i+1, **{k:v for k,v in result.items() if k not in ('stages','images','hashes','frames')}}), flush=True)
             page.close()
-        summary={key:median(r[key] for r in runs) for key in ('downloadMs','decodeMs','uploadMs','sortMs','drawMs','maxHeartbeatGapMs','cpuBytes','gpuUploadBytes','decodeUploadMs')}
+        summary={key:median(r[key] for r in runs) for key in ('downloadMs','decodeMs','uploadMs','sortPrepareMs','sortMs','warmSortMs','drawMs','maxHeartbeatGapMs','cpuBytes','gpuUploadBytes','decodeUploadMs')}
         if args.compare:
             baseline=json.loads(args.compare.read_text())['runs'][0]
             for key in ('count','coefficients','hashes','frames'):

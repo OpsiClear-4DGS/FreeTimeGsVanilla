@@ -31,7 +31,8 @@
     "README.md"
   ],
   "sideEffects": [
-    "./src/sort-worker.js"
+    "./src/sort-worker.js",
+    "./src/decode-worker.js"
   ],
   "engines": {
     "node": ">=22"

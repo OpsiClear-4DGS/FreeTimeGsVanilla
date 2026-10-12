@@ -39,6 +39,42 @@ they are not process peak memory or total allocated VRAM.
   releasing the WebGL decoder. Keep byte-exact native WebP decoding and all
   ZIP checksums, size checks, metadata validation and abort checks.
 
+## Worker decoding and prepared sorting
+
+The player now decodes in a temporary module worker and transfers the resulting
+attribute buffers to the main thread. It releases that worker after success,
+failure or cancellation. The same direct decoder remains available when worker
+startup or offscreen graphics are unsupported. Invalid packages fail without
+retrying on the main thread. The raw file, codec and reconstructed values do
+not change.
+
+On the same full Jensen example, decode plus upload is 1.08 s, median of three
+loads. The median worst 16 ms timer gap during decoding falls from 232 ms to
+16 ms; the first cold browser run still has a 170 ms gap. That measurement
+excludes the later GPU upload and is a responsiveness check, not a guarantee
+that every frame takes 16 ms.
+
+The sorting worker prepares conservative temporal bounds once and reuses its
+depth, ID, key and histogram buffers. Points outside those bounds cannot pass
+the existing opacity threshold; candidates still use the original exponential
+test. The threshold, quantized depth bins, stable tie order and per-frame camera
+projection remain unchanged. Each output index buffer is separate and can be
+transferred without detaching the reusable scratch arrays.
+
+A paired warm comparison against commit `2cb5862`, across all 121 Jensen
+timestamps, reduces median CPU sorting from 68.8 ms to 11.7 ms (about 5.9×).
+Initialization takes about 32 ms in the sorting worker. Visibility bounds add
+16 MB for 2M points; reusable scratch arrays use about 20.3 MB. Bounds are used
+for continuous Gaussian timelines with an opacity floor below the visibility
+threshold. Static/discrete timelines and higher floors retain their existing
+visibility behavior. `createSorter()` assumes immutable model arrays; create a
+new sorter when changing those arrays. The player does this on model load.
+
+All 121 frame orders and ten alternate-camera/time combinations match the
+earlier sorter exactly. Worker-decoded attributes and two rendered frames match
+the original full-quality hashes. Worker checks also cover embedded audio,
+sampling, corruption, fallback, early cancellation and teardown.
+
 The low-level TSOG reader still returns dense SH arrays by default. The player
 selects the compact representation automatically. This is an internal layout
 choice, rather than a quality setting.
@@ -69,7 +105,10 @@ python tools/benchmark-loading.py --output /tmp/optimized.json \
 ```
 
 `--compare` checks all logical attributes and rendered frames for exact
-equality. Hashing happens after timed stages. `--browser PATH` selects a browser;
+equality. The loading benchmark now uses worker decoding and prepared sorting;
+`--main-thread` selects direct decoding for comparison. It reports one-time
+sort preparation, first sorting and warm sorting separately. Hashing happens
+after timed stages. `--browser PATH` selects a browser;
 `--root PATH` selects another source tree. The benchmark serves files locally
 and loads every point. In the bundled FTGS copy the manifest downloads the
 same hosted example before starting the decode timer. Run without competing

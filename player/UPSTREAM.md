@@ -1,12 +1,14 @@
 # Bundled player source
 
 Source: [OpsiClear-4DGS/ftgs-player](https://github.com/OpsiClear-4DGS/ftgs-player).
-Revision: [`2cb5862`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/2cb58626dfb993c281c0d9b86194e6ea7f561f23).
+Revision: [`4dbcc62`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/4dbcc6289fab3f0da163e855ba3a10e780860812).
 
 `src/`, `site/`, the embedding hosts, TSOG tools, schema and synthetic
 conformance/browser checks come from this revision. Rendering and playback
-math preserve the same attributes and pixels. TSOG loading shares SH centroids,
-reuses covariance buffers and yields during long batches. The bundled UI shares its compact opening panel,
+math preserve the same attributes and pixels. Decoding runs in a temporary
+worker where supported. Sorting caches conservative temporal bounds and reuses
+scratch buffers. TSOG loading shares SH centroids and covariance buffers.
+The bundled UI shares its compact opening panel,
 borderless transport, audio defaults, speed and fullscreen behavior.
 
 Bundle differences:

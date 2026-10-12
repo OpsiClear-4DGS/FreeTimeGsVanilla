@@ -17,9 +17,11 @@ Playback uses borderless icon controls below the scene, with seeking, speed,
 audio and bottom-right fullscreen. Audio starts enabled; press Play if the
 browser blocks autoplay with sound. Local files stay in your browser.
 
-TSOG loading preserves shared SH palettes and reuses decoding buffers without
-removing Gaussians or coefficients. The full Jensen example's measured decode
-plus upload time fell from 5.91 s to 1.06 s in headless Chromium.
+TSOG loading preserves shared SH palettes and runs decoding off the UI thread
+where supported. Sorting caches conservative visibility bounds and reuses
+scratch buffers. The full Jensen example decodes and uploads in about 1.1 s;
+warm sorting fell from 68.8 ms to 11.7 ms in headless Chromium. All Gaussians,
+coefficients and rendering behavior are preserved.
 [Loading benchmarks and quality checks](docs/PERFORMANCE.md).
 
 - [Controls, URL settings, audio and AR](docs/PLAYER.md)

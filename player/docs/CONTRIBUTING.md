@@ -5,8 +5,8 @@ The canonical player lives in
 [UPSTREAM.md](../UPSTREAM.md) records this copy's revision and bundle differences.
 
 Keep `src/` independent of the opt-in website UI in `site/`. Preserve the root
-module aliases for existing browser and Node imports; the sorting worker must
-remain beside its imported sorting module.
+module aliases for existing browser and Node imports; decoding and sorting
+workers must remain available with their imported modules.
 
 From the FreeTimeGsVanilla repository root, run:
 
@@ -19,6 +19,7 @@ python -m playwright install chromium
 python player/tests/browser_smoke.py
 python player/tests/browser_api.py
 python player/tests/browser_tsog.py
+python player/tests/browser_workers.py
 python player/tests/browser_audio.py
 python player/tests/browser_xr.py
 python player/tests/browser_sandbox.py

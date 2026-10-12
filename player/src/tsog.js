@@ -1,4 +1,4 @@
-// Repository-owned TSOG v4 decoder, based on Xiaomi Research's format/encoder.
+// TSOG version 1 decoder, including the legacy Xiaomi v4 attribute layout.
 // Paper, original repository, compatibility and licenses: ../docs/TSOG.md and ../docs/THIRD_PARTY.md.
 import { boundsForModel, covarianceFromVariances } from "./ftgs.js";
 import { openZip } from "./zip.js";
@@ -85,13 +85,13 @@ function unpackQuaternion(bytes, offset, quaternion) {
 }
 
 export function validateTSOGMetadata(meta, { requireProfile = false } = {}) {
-  if (!object(meta) || meta.version !== 4)
-    invalid("only the original exporter's version 4 is supported.");
+  if (!object(meta) || ![1, 4].includes(meta.version))
+    invalid("only TSOG version 1 and legacy Xiaomi version 4 are supported.");
   if (meta.profile !== undefined) {
     if (!object(meta.profile) || meta.profile.id !== TSOG_PROFILE.id ||
         meta.profile.version !== TSOG_PROFILE.version)
       invalid("unsupported TSOG playback profile or profile version.");
-  } else if (requireProfile) invalid("an explicit TSOG playback profile is required.");
+  } else if (requireProfile || meta.version === 1) invalid("an explicit TSOG playback profile is required.");
   if (!positiveInteger(meta.count))
     invalid("count must be a positive integer.");
   validateFiles(meta.means, [2], "means");

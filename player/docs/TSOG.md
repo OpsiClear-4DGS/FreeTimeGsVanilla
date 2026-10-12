@@ -68,12 +68,14 @@ repository license.
 This player adds two **optional root fields** to `meta.json`, defined by
 [TSOG Playback Profile 1](TSOG-SPEC.md). These are this repository's additions,
 not fields defined by the original TSOG exporter or SOG specification. New
-packages include the profile declaration below. The base version remains 4 and
-Gaussian images are unchanged. Legacy files without a declaration remain
+packages use file version 1 and include the profile declaration below.
+Gaussian images retain the supported Xiaomi v4 attribute layout. Legacy
+version-4 files without a declaration remain
 readable; files without playback/audio fields retain the defaults below.
 
 ```json
 {
+  "version": 1,
   "profile": { "id": "org.opsiclear.tsog-playback", "version": 1 },
   "playback": { "duration": 10, "fps": 30, "rate": 1, "loop": true },
   "audio": { "file": "audio/track.mp3", "mimeType": "audio/mpeg", "volume": 0.8 }
@@ -144,7 +146,7 @@ time. The API exposes `audio.status` and `audiochange` for custom controls. See
 ### Add audio or change defaults
 
 The dependency-free packaging command uses Node.js 22 or newer and starts from
-an existing TSOG version-4 archive. It neither converts `.ftgs.ply` files nor
+an existing TSOG version-1 or legacy Xiaomi version-4 archive. It neither converts `.ftgs.ply` files nor
 encodes Gaussian attributes. In FreeTimeGsVanilla, run the commands below from
 `player/`; in the standalone player repo, run them from the repository root.
 
@@ -160,7 +162,7 @@ Use `--no-loop` for a clip that stops at its end. Unspecified defaults and other
 metadata are retained; the tool copies the attribute images without encoding
 them again. Output must end in `.tsog`; existing output files are never
 overwritten. Run `--help` for the options. Use a new output filename for changes.
-Every output declares profile version 1. An unsupported profile ID or version
+Every output declares file version 1 and profile version 1. An unsupported profile ID or version
 is rejected instead of silently downgrading it.
 
 | Flag | Effect |

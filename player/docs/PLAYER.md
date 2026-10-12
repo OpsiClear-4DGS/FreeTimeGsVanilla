@@ -34,7 +34,7 @@ Drop the resulting `.tsog` into the player. The command preserves the encoded
 Gaussian images and stores the audio bytes without transcoding. Omit `--audio`
 to keep a track while changing defaults, or use `--remove-audio` to remove it.
 Existing output files are never overwritten. This command updates an existing
-TSOG version-4 package; it does not convert a `.ftgs.ply` into TSOG.
+TSOG version-1 or legacy Xiaomi version-4 package; it does not convert a `.ftgs.ply` into TSOG.
 
 Audio starts enabled. If audible autoplay is blocked, the website pauses the
 scene. Press **Play** to start the scene and its audio together, or use
@@ -53,7 +53,7 @@ For an independent reader/writer, use the versioned
 [TSOG Playback Profile 1 specification](TSOG-SPEC.md),
 [metadata schema](../tsog.schema.json), and
 [synthetic conformance examples](https://github.com/OpsiClear-4DGS/ftgs-player/tree/main/tests/fixtures/tsog/CONFORMANCE.md).
-New packages declare profile version 1; legacy v4 files remain supported.
+New packages declare file version 1 and profile version 1; legacy Xiaomi v4 files remain supported.
 Validate metadata and the container with Node.js 22+:
 
 ```bash
@@ -221,7 +221,7 @@ which is a player setting rather than information stored in FTGS v1. For files
 without a frame count, the default is 300; `?frames=120` overrides it. Frame `i`
 maps to normalized time `i / max(n_frames - 1, 1)`.
 
-Packaged **TSOG version 4** is also supported, including continuous motion,
+Packaged **TSOG version 1** and legacy Xiaomi version 4 are supported, including continuous motion,
 discrete frame sequences and static models. Drop one `.tsog` ZIP package;
 the player decodes its WebP attributes locally. Discrete files use their own
 frame count and FPS unless FPS is explicitly overridden. See [TSOG support](TSOG.md)

@@ -27,4 +27,8 @@ for path in fixtures.glob("*.tsog"):
     with zipfile.ZipFile(path) as archive:
         validator.validate(json.loads(archive.read("meta.json")))
 validator.validate(json.loads((fixtures / "decode-vector.json").read_text())["meta"])
+current = {**corpus["base"], "version": 1, "profile": {"id": "org.opsiclear.tsog-playback", "version": 1}}
+validator.validate(current)
+del current["profile"]
+assert list(validator.iter_errors(current)), "Unmarked version-1 input was accepted"
 print(f"Schema passed {len(corpus['cases'])} metadata cases, all synthetic archives and the decoding vector.")

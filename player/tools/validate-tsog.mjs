@@ -24,7 +24,7 @@ try {
     });
     console.log(json ? JSON.stringify(result, null, 2) :
       `PASS metadata/container: ${result.count} Gaussians, ${result.timeline}, ${result.images} images, audio ${result.audio ? "present" : "absent"}.\n` +
-      `${result.legacy ? "Legacy v4 (no profile declaration)." : "TSOG Playback Profile 1."} Image pixels and audio codecs were not decoded.`);
+      `${result.legacy ? "Legacy Xiaomi v4 (no profile declaration)." : `TSOG version ${result.version}, playback profile 1.`} Image pixels and audio codecs were not decoded.`);
   }
 } catch (error) {
   if (json) console.log(JSON.stringify({ valid: false, error: error.message }));

@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://opsiclear-4dgs.github.io/ftgs-player/tsog.schema.json",
-  "title": "TSOG Playback Profile 1 metadata (including legacy v4 imports)",
-  "description": "Structural constraints only. docs/TSOG-SPEC.md defines cross-field, archive, pixel and playback requirements. Conforming new writers must include profile; legacy readers may accept its absence.",
+  "title": "TSOG version 1 metadata (including legacy Xiaomi v4 imports)",
+  "description": "Structural constraints only. docs/TSOG-SPEC.md defines cross-field, archive, pixel and playback requirements. Version 1 requires profile 1; legacy Xiaomi v4 imports may omit it.",
   "type": "object",
   "required": ["version", "count", "means", "scales", "quats", "sh0"],
   "properties": {
-    "version": { "const": 4 },
+    "version": { "type": "integer", "enum": [1, 4] },
     "profile": {
       "type": "object",
       "required": ["id", "version"],
@@ -100,6 +100,10 @@
   },
   "dependentRequired": { "temporal": ["timeline"] },
   "allOf": [
+    {
+      "if": { "required": ["version"], "properties": { "version": { "const": 1 } } },
+      "then": { "required": ["profile"] }
+    },
     {
       "if": { "required": ["audio"], "not": { "required": ["timeline"] } },
       "then": { "required": ["playback"], "properties": { "playback": { "required": ["duration"] } } }

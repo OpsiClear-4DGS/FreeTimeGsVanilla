@@ -64,6 +64,7 @@ export async function packageTSOG(
 ) {
   const archive = await openZip(input, signal);
   const meta = await readTSOGMetadata(archive);
+  meta.version = 1;
   meta.profile = { ...meta.profile, ...TSOG_PROFILE };
   const oldAudio = meta.audio?.file;
   if (playback !== undefined) {

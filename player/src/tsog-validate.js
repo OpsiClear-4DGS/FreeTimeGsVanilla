@@ -34,6 +34,7 @@ export async function validateTSOGPackage(blob, { signal, requireProfile = false
   return {
     valid: true,
     level: decodeImage ? "attributes" : "container",
+    version: meta.version,
     profile: meta.profile ?? null,
     legacy: meta.profile === undefined,
     count: meta.count,

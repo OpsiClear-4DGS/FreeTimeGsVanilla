@@ -8,12 +8,14 @@ The website fetches this file only when the example is selected.
 The display name is Slop Example. Existing `jensen-2m` URLs and filenames
 remain available for compatibility.
 
-`jensen-2m.tsog` is the unchanged reconstruction from
+`jensen-2m.tsog` contains the preserved reconstruction from
 [sam3dbx4danyone](https://github.com/OpsiClear-4DGS/sam3dbx4danyone):
 the Base36 Jensen 2M run with original 1M movement scales, fitting seed 2042.
 It contains 121 source timestamps at 24 fps, 5 seconds of animated content,
-and the original embedded audio track. The ZIP container is 45,106,423 bytes
-(45.1 MB). The detailed provenance, SHA-256 and camera bookmark are in
+and the original embedded audio track. The version-1 ZIP container is 45,092,406
+bytes (45.1 MB). Its attribute images, soundtrack and decoded values are unchanged;
+only metadata and ZIP packaging were updated. The original version-4 container
+checksum, current SHA-256, detailed provenance and camera bookmark are in
 [jensen-2m.json](jensen-2m.json).
 
 This is an example reconstruction from generated multiview inputs, not a

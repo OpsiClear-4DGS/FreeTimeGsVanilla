@@ -1,7 +1,7 @@
 # Bundled player source
 
 Source: [OpsiClear-4DGS/ftgs-player](https://github.com/OpsiClear-4DGS/ftgs-player).
-Revision: [`94bc507`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/94bc50739c1feecd4be45a731f31d6626d80697b).
+Revision: [`009c622`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/009c6228153c1905fac774be8ef22487e0f39664).
 
 `src/`, `site/`, the embedding hosts, TSOG tools, schema and synthetic
 conformance/browser checks come from this revision. Rendering and playback
@@ -10,6 +10,8 @@ worker where supported. Sorting caches conservative temporal bounds and reuses
 scratch buffers. TSOG loading shares SH centroids and covariance buffers.
 The bundled UI shares its compact opening panel,
 borderless transport, audio defaults, speed and fullscreen behavior.
+TSOG readers accept version 1 and legacy Xiaomi v4; packaging emits version 1
+with playback profile 1.
 
 Bundle differences:
 

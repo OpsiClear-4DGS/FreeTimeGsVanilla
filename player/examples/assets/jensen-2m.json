@@ -6,8 +6,8 @@
   "frames": 121,
   "fps": 24,
   "duration": 5,
-  "bytes": 45106423,
-  "sha256": "df27dd645ebed2fd553973e4b0da8fcf2caf7138711a8e76910d61adacd33f05",
+  "bytes": 45092406,
+  "sha256": "7448cb911937cf4570c94e24c1002fdf6d16eb7594c35ebc0fa3f47c303640bc",
   "audio": true,
   "view": {
     "eye": [
@@ -30,6 +30,7 @@
     "fitting_seed": 2042,
     "checkpoint_sha256": "180db182d3fa7662b9281064b4bb1e4904ae4e45c2b7033f6d5c5879d5080436",
     "study": "base36-budget2m-20261010-234756",
-    "reference": "Excluded Camera00 validation; generated inputs, not captured physical ground truth"
+    "reference": "Excluded Camera00 validation; generated inputs, not captured physical ground truth",
+    "legacy_v4_container_sha256": "df27dd645ebed2fd553973e4b0da8fcf2caf7138711a8e76910d61adacd33f05"
   }
 }

@@ -350,7 +350,7 @@ Use `src/tsog-package.js` or the package’s `@opsiclear/ftgs-player/package` ex
 playback metadata. It uses the shared TSOG and ZIP modules; the Node CLI in
 `tools/` is only needed for command-line packaging.
 
-Packages declare [TSOG Playback Profile 1](TSOG-SPEC.md); older v4 packages are
+Packages declare [TSOG version 1 / playback profile 1](TSOG-SPEC.md); older Xiaomi v4 packages are
 still readable. Import `@opsiclear/ftgs-player/validate` (or copy `src/`) for the optional `validateTSOGPackage()`
 API. It validates metadata and container contents by default; supplying an
 image-decoder callback enables checks of every decoded Gaussian. The

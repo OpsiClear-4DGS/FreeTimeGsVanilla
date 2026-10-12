@@ -55,6 +55,23 @@ test("independent analytic vector fixes byte order, channel order, SH, motion an
   assert.deepEqual(resolvePlayback(model), expected.playback);
 });
 
+test("version 1 requires its profile and decodes the same attributes as legacy Xiaomi v4", async () => {
+  const { meta, images } = await json("decode-vector.json");
+  const current = { ...meta, version: 1, profile: TSOG_PROFILE };
+  const load = async (name) => {
+    const { width, height, pixels, fill } = images[name];
+    return { width, height, rgba: Uint8Array.from((pixels ?? Array(width * height).fill(fill)).flat()) };
+  };
+  const legacy = await decodeTSOG(meta, load);
+  const model = await decodeTSOG(current, load);
+  for (const name of ["positionTime", "velocityDuration", "covarianceA", "covarianceB", "alpha", "sh"])
+    assert.deepEqual(model[name], legacy[name], name);
+  assert.deepEqual(resolvePlayback(model), resolvePlayback(legacy));
+  assert.throws(() => validateTSOGMetadata({ ...current, profile: undefined }), /explicit/);
+  assert.throws(() => validateTSOGMetadata({ ...current, profile: { ...TSOG_PROFILE, version: 2 } }), /profile/);
+  assert.throws(() => validateTSOGMetadata({ ...current, version: 2 }), /version/);
+});
+
 test("legacy archives and profile packaging pass container checks without changing attribute bytes", async () => {
   for (const name of ["static", "discrete", "continuous8", "continuous16"]) {
     const input = await source(`${name}.tsog`);
@@ -63,9 +80,13 @@ test("legacy archives and profile packaging pass container checks without changi
     const packaged = await packageTSOG(input);
     const report = await validateTSOGPackage(packaged, { requireProfile: true });
     assert.equal(report.level, "container");
+    assert.equal(report.version, 1);
     assert.deepEqual(report.profile, TSOG_PROFILE);
     assert.equal(report.audioCodecChecked, false);
     const before = await openZip(input), after = await openZip(packaged);
+    const meta = JSON.parse(new TextDecoder().decode(await after.read("meta.json")));
+    assert.equal(meta.version, 1);
+    assert.deepEqual(meta.profile, TSOG_PROFILE);
     for (const file of before.names.filter((file) => file !== "meta.json"))
       assert.deepEqual(await after.read(file), await before.read(file));
   }

@@ -7,9 +7,13 @@ file, reconstruction and audio are unchanged.
 ## Measured example
 
 Slop Example: 2,000,000 Gaussians, degree-3 SH, 65,536 shared centroids, 121
-timestamps, embedded audio, 45,106,423-byte TSOG. Measured on 2026-10-12 in
+timestamps, embedded audio, original 45,106,423-byte version-4 TSOG. Measured on 2026-10-12 in
 Chromium 153 on Linux, headless SwiftShader, at 640×480. Each value is the
 median of three page loads. The baseline is commit `4af9e12`.
+
+The first format release repackages the example as version 1 (45,092,406 bytes).
+Metadata and ZIP records change; all attribute images, audio bytes and decoded
+values are unchanged. The timings above describe the original container.
 
 | Stage / data | Baseline | Optimized |
 | --- | ---: | ---: |

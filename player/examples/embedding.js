@@ -20,6 +20,55 @@ for (const mode of ["canvas", "iframe"]) {
   if ((iframe ? "iframe" : "canvas") === mode) link.setAttribute("aria-current", "page");
 }
 
+const hostedPlayer = new URL("https://opsiclear-4dgs.github.io/ftgs-player/");
+hostedPlayer.searchParams.set(exampleId ? "example" : "demo", exampleId ?? "1");
+hostedPlayer.searchParams.set("autoplay", "0");
+const snippet = iframe ? `<iframe
+  src="${hostedPlayer.href.replaceAll("&", "&amp;")}"
+  title="4D scene"
+  allow="autoplay; xr-spatial-tracking"
+  allowfullscreen
+  style="display:block;width:100%;height:480px;border:0"
+></iframe>` : `<canvas id="scene" tabindex="0" aria-label="4D scene"
+  style="display:block;width:100%;height:480px;touch-action:none">
+</canvas>
+<button id="play" type="button">Play / pause</button>
+
+<script type="module">
+  import { FTGSPlayer } from "./ftgs-player/src/index.js";
+
+  const player = new FTGSPlayer(document.querySelector("#scene"), {
+    autoplay: false,
+  });
+  await player.load("./assets/scene.tsog");
+
+  document.querySelector("#play").onclick = () => {
+    if (player.playing) player.pause();
+    else player.play();
+  };
+  // Call player.destroy() when removing the player from your page.
+</script>`;
+$("code-title").textContent = iframe ? "Iframe embed" : "Canvas embed";
+$("code-note").textContent = iframe
+  ? "Paste into your page. Playback, speed, audio and fullscreen controls are included."
+  : "Copy src/ into ftgs-player/src/ in your project, then replace the scene URL.";
+$("embed-code").textContent = snippet;
+$("copy-code").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(snippet);
+    $("copy-code").textContent = "Copied";
+    $("copy-status").textContent = "Embedding code copied.";
+  } catch {
+    const selection = getSelection();
+    const range = document.createRange();
+    range.selectNodeContents($("embed-code"));
+    selection.removeAllRanges();
+    selection.addRange(range);
+    $("embed-code").parentElement.focus();
+    $("copy-status").textContent = "Code selected. Use your browser's copy command.";
+  }
+};
+
 let player;
 const download = new AbortController();
 addEventListener("pagehide", (event) => {

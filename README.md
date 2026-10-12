@@ -440,9 +440,8 @@ Open <http://localhost:8765> and drop a file onto the page. Local files stay in
 the browser. The scene fills the window, with compact borderless controls below
 it that fade during playback. Canvas and iframe examples share speed controls
 and bottom-right fullscreen. Play, pause, seek, change speed, orbit/pan/zoom, or
-move with WASD
-(Q/E down/up; Shift moves faster). The default preview loads up to 1 million
-Gaussians; use `?points=all` for full detail when GPU memory allows.
+move with WASD (Q/E down/up; Shift moves faster). The default preview loads up
+to 1 million Gaussians; use `?points=all` for full detail when GPU memory allows.
 
 | File | Playback support |
 | --- | --- |
@@ -497,6 +496,18 @@ iframe controls, including `load`, `play`, `pause`, `seek`, `setPlaybackRate`,
 `setMuted`, `setVolume`, events, and `destroy`. It includes canvas, iframe, and
 React examples. An iframe with audio and AR should use
 `allow="autoplay; xr-spatial-tracking"` and keep controls available for user gestures.
+
+The [canvas example](https://opsiclear-4dgs.github.io/ftgs-player/examples/embedding.html?mode=canvas) and
+[iframe example](https://opsiclear-4dgs.github.io/ftgs-player/examples/embedding.html?mode=iframe) show copyable
+integration code beneath the player. The iframe snippet includes the player's
+built-in controls; the canvas snippet uses modules served by your own project.
+
+The [hosted embedding example](https://opsiclear-4dgs.github.io/ftgs-player/examples/embedding.html?mode=iframe)
+and player include X Player Card and Open Graph tags, credited to **@Yeheliu**.
+They advertise a preview image and a five-second H.264/AAC render of the Jensen
+2M scene with its original audio. The preview page starts paused with sound
+enabled; the shared page opens the interactive 4D player. X controls whether it
+shows inline playback or an image/link preview.
 
 See the [player documentation](player/docs/PLAYER.md) for controls, URL options,
 rendering limits, and tests. The repository-owned [TSOG module](player/docs/TSOG.md)

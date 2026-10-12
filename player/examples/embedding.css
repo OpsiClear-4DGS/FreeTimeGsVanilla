@@ -22,6 +22,14 @@ canvas { max-height: 150vw; }
 #message { margin: 12px 0 0; color: var(--error); overflow-wrap: anywhere; font-size: 13px; }
 #message[data-state="loading"] { color: var(--text-secondary); }
 #message:empty { display: none; }
+.code-example { margin-top: 28px; }
+.code-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.code-heading h2 { margin: 0; font-size: 15px; font-weight: 500; }
+#copy-code { min-height: 36px; padding: 6px 10px; border: 0; border-radius: var(--radius); color: var(--text-secondary); background: transparent; font-size: 12px; }
+#copy-code:hover { color: var(--text-primary); background: var(--bg-hover); }
+.code-note { margin: 4px 0 12px; color: var(--text-muted); font-size: 12px; }
+.code-example pre { margin: 0; padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-secondary); font: 12px/1.7 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 600px) {
   body { padding: 20px 12px; }
   .example-heading { margin-bottom: 20px; }
@@ -32,4 +40,6 @@ canvas { max-height: 150vw; }
   .player-link { width: 100%; margin-top: 4px; }
   .player-stage { height: 68dvh; }
   .controls { padding: 6px 8px; }
+  .code-example { margin-top: 20px; }
+  .code-example pre { padding: 12px; font-size: 11px; }
 }

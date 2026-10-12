@@ -13,5 +13,6 @@ __pycache__/
 
 # Published Jensen example is deliberately retained.
 !examples/assets/jensen-2m.tsog
+!examples/assets/jensen-preview.mp4
 dist/
 *.tgz

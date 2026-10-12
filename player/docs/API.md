@@ -14,6 +14,9 @@ The canvas and iframe host examples include playback speed and a bottom-right
 fullscreen button. Fullscreen expands the scene and its controls together.
 Audio defaults to enabled; the main Play button starts playback with sound.
 Fullscreen is owned by the host DOM container, not a controller method.
+Each example shows copyable integration code below its player. The iframe
+snippet is a minimal HTML embed with built-in controls; the canvas snippet
+shows local modules, a scene URL and a host-owned play/pause button.
 
 ## Canvas API
 

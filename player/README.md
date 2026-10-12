@@ -27,8 +27,16 @@ browser blocks autoplay with sound. Local files stay in your browser.
 `site/` contains the standalone UI. Root JavaScript entry points continue
 forwarding to these modules for existing integrations, including TSOG packaging.
 The examples use the same speed, audio and fullscreen controls for canvas and
-iframe hosts. The Jensen example is fetched only when selected; its 45 MB
+iframe hosts, and show mode-specific integration code below the player with
+a Copy code button. The Jensen example is fetched only when selected; its 45 MB
 model is hosted in the standalone project. `?demo=1` uses a generated scene.
+
+The hosted player and example pages include static X Player Card and Open
+Graph tags, credited to **@Yeheliu**. They use a 1200×675 preview picture and a
+[five-second video preview](examples/social-player.html) with source audio.
+The light JPEG/MP4 assets are bundled here; the full interactive model remains
+hosted in the standalone project. X decides whether it shows inline playback
+or an image/link preview. See the [preview provenance](examples/assets/README.md).
 
 Code is **AGPL-3.0-only**. Retain [LICENSE](LICENSE) and
 [third-party notices](docs/THIRD_PARTY.md), including the bundled font licenses.

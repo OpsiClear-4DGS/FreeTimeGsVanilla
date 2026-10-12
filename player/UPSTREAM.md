@@ -1,7 +1,7 @@
 # Bundled player source
 
 Source: [OpsiClear-4DGS/ftgs-player](https://github.com/OpsiClear-4DGS/ftgs-player).
-Revision: [`b796585`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/b7965854604ccd37a0bc906e867cb8dc5bd1d761).
+Revision: [`94bc507`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/94bc50739c1feecd4be45a731f31d6626d80697b).
 
 `src/`, `site/`, the embedding hosts, TSOG tools, schema and synthetic
 conformance/browser checks come from this revision. Rendering and playback

@@ -51,3 +51,5 @@ cover playback in cross-origin and opaque sandbox iframes.
 
 Code is **AGPL-3.0-only**. Retain [LICENSE](LICENSE) and
 [third-party notices](docs/THIRD_PARTY.md), including the bundled font licenses.
+The independent [TSOG format project](https://github.com/OpsiClear-4DGS/tsog)
+maintains the Apache-2.0 file specification, schema and optimized codec examples.

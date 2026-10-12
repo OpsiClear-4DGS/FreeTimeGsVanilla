@@ -1,5 +1,9 @@
 # Packaged TSOG guide
 
+The canonical format specification and independent Apache-2.0 codec examples
+are maintained in [OpsiClear-4DGS/tsog](https://github.com/OpsiClear-4DGS/tsog).
+This guide documents the AGPL player's packaging and playback integration.
+
 **Format implementers:** use [TSOG Playback Profile 1](TSOG-SPEC.md), the normative
 specification, [JSON Schema](../tsog.schema.json), and
 [conformance corpus](https://github.com/OpsiClear-4DGS/ftgs-player/tree/main/tests/fixtures/tsog/CONFORMANCE.md). This guide covers usage.

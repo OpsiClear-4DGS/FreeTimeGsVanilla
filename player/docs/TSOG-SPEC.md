@@ -2,6 +2,11 @@
 
 Specification version **1.0.1**, 2026-09-28. Maintained by **OpsiClear-4DGS**.
 
+The independent Apache-2.0 format project now maintains the
+[canonical specification](https://github.com/OpsiClear-4DGS/tsog/blob/main/spec/FORMAT.md),
+schema and codec examples. This retained copy documents the player's existing
+v4 / profile-1 compatibility rules. The encoded format identifiers are unchanged.
+
 This document specifies a `.tsog` interchange profile: the supported subset of
 Xiaomi Research's version-4 Gaussian encoding, plus optional playback defaults
 and one embedded audio track. It defines the bytes and their interpretation so

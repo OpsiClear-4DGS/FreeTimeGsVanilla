@@ -518,7 +518,10 @@ SH coefficients. See the measured full-quality
 
 See the [player documentation](player/docs/PLAYER.md) for controls, URL options,
 rendering limits, and tests. The repository-owned [TSOG module](player/docs/TSOG.md)
-documents the
+uses the format specified by the independent
+[Apache-2.0 TSOG project](https://github.com/OpsiClear-4DGS/tsog). That project
+contains the canonical specification, schema and optimized codec examples.
+The bundled guide also documents the
 [TSOG paper](https://arxiv.org/abs/2607.28049),
 [Xiaomi Research's repository](https://github.com/xiaomi-research/tsog), and
 [license notices](player/docs/THIRD_PARTY.md).

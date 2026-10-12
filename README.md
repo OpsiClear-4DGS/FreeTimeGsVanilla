@@ -507,7 +507,9 @@ and player include X Player Card and Open Graph tags with a 1200×675 thumbnail.
 The card targets the interactive Jensen 2M 4DGS web app, with camera navigation,
 playback controls and embedded scene audio. No personal account attribution
 is attached. X controls whether it opens the player inside its card, its
-in-app browser or a regular browser.
+in-app browser or a regular browser. The card starts paused; pressing Play
+starts the scene with audio. Browser iframe compatibility is tested; actual
+X card acceptance requires a real post and testing in X clients.
 
 See the [player documentation](player/docs/PLAYER.md) for controls, URL options,
 rendering limits, and tests. The repository-owned [TSOG module](player/docs/TSOG.md)

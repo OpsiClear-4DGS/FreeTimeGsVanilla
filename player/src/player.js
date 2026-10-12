@@ -27,6 +27,17 @@ export const PLAYER_EVENTS = Object.freeze([
 const owners = new WeakMap();
 const aborted = () => new DOMException("Loading was cancelled.", "AbortError");
 
+function createSortWorker() {
+  try {
+    return new Worker(new URL("./sort-worker.js", import.meta.url), { type: "module" });
+  } catch (error) {
+    if (error.name !== "SecurityError") throw error;
+  }
+  // Opaque iframe origins need an opaque module bootstrap for the CORS import.
+  const script = `import ${JSON.stringify(new URL("./sort-worker.js", import.meta.url).href)};`;
+  return new Worker(`data:text/javascript,${encodeURIComponent(script)}`, { type: "module" });
+}
+
 /** A self-contained canvas player. No UI, global shortcuts, or document styles. */
 export class FTGSPlayer extends EventTarget {
   #canvas;
@@ -317,12 +328,7 @@ export class FTGSPlayer extends EventTarget {
         });
         pendingAudio = track;
       }
-      const worker = new Worker(
-        new URL("./sort-worker.js", import.meta.url),
-        {
-          type: "module",
-        },
-      );
+      const worker = createSortWorker();
       try {
         this.#renderer.setModel(data);
         this.#connectWorker(worker, data);

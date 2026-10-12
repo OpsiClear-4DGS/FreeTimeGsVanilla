@@ -1,6 +1,6 @@
 import { FTGSPlayer, FTGSEmbed } from "../index.js";
 import { demoFile } from "../site/demo.js";
-import { readExample, downloadExample } from "../site/examples.js?v=2";
+import { readExample, downloadExample } from "../site/examples.js?v=3";
 
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);

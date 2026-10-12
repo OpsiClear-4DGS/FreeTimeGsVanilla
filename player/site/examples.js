@@ -13,9 +13,9 @@ export async function readExample(id, { signal } = {}) {
 }
 
 export async function downloadExample(example, options) {
-  // Cross-origin hosts may permit downloads without exposing Content-Range.
-  // Keep validated ranges for local assets; retry a whole request for hosted ones.
-  const local = example.source.origin === location.origin;
+  // Opaque sandbox origins and remote hosts may hide Content-Range from CORS.
+  // Keep validated ranges for local assets; retry a whole request otherwise.
+  const local = example.source.origin === globalThis.origin;
   const blob = await downloadFile(example.source, {
     ...options, bytes: local ? example.bytes : undefined,
   });

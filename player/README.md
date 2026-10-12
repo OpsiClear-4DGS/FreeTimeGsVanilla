@@ -37,6 +37,10 @@ The card's player URL opens the interactive Jensen 2M 4DGS scene with playback,
 camera navigation and its embedded audio. The thumbnail is bundled here; the
 full model remains hosted in the standalone project. X controls whether it
 opens the player inside its card, its in-app browser or a regular browser.
+The card starts paused; press Play to start playback with audio, avoiding
+audible autoplay as required by [X's card policy](https://docs.x.com/developer-terms/policy#x-cards).
+Browser checks cover cross-origin and opaque sandbox iframes. X acceptance
+still requires testing a real post in X clients.
 See the [thumbnail provenance](examples/assets/README.md).
 
 Code is **AGPL-3.0-only**. Retain [LICENSE](LICENSE) and

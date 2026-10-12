@@ -294,6 +294,13 @@ resolve against the **parent page**. URLs in the iframe page's `?src=` parameter
 resolve against the **player page**. A model server on a different origin from
 the iframe must allow CORS.
 
+If the host sets an iframe `sandbox`, `FTGSEmbed` requires `allow-scripts
+allow-same-origin` so it can validate the child's origin. A plain iframe with
+built-in controls also works with `sandbox="allow-scripts"`; its opaque origin
+needs CORS access to the modules and model and permission to create a `data:`
+module worker. A social platform chooses its own restrictions and whether to embed
+the page; browser iframe tests do not certify a platform's card acceptance.
+
 Page options include `speed`, `muted`, `volume`, `loop`, and `autoplay`, plus
 the timing, rendering, camera, and AR settings listed in the
 [URL options reference](PLAYER.md#url-options). Pass them in the iframe's `src`

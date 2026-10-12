@@ -503,13 +503,13 @@ integration code beneath the player. The iframe snippet includes the player's
 built-in controls; the canvas snippet uses modules served by your own project.
 
 The [hosted embedding example](https://opsiclear-4dgs.github.io/ftgs-player/examples/embedding.html?mode=iframe)
-and player include X Player Card and Open Graph tags with a 1200×675 thumbnail.
-The card targets the interactive Jensen 2M 4DGS web app, with camera navigation,
-playback controls and embedded scene audio. No personal account attribution
-is attached. X controls whether it opens the player inside its card, its
-in-app browser or a regular browser. The card starts paused; pressing Play
-starts the scene with audio. Browser iframe compatibility is tested; actual
-X card acceptance requires a real post and testing in X clients.
+and player include static X large-image cards and Open Graph tags with a
+1200×675 thumbnail and no personal account attribution. Share the dedicated
+[Jensen scene page](https://opsiclear-4dgs.github.io/ftgs-player/examples/jensen-2m.html)
+for an image link to the interactive 4DGS player. It opens the full scene,
+paused with audio enabled; press Play to start playback. X controls preview
+display and whether links open in its in-app browser. Actual previews require
+checking a real post in X.
 
 See the [player documentation](player/docs/PLAYER.md) for controls, URL options,
 rendering limits, and tests. The repository-owned [TSOG module](player/docs/TSOG.md)

@@ -7,7 +7,9 @@ import { readExample, downloadExample } from "./examples.js?v=3";
 mountPlayerShell(document.getElementById("viewer"));
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
-const exampleId = query.get("src") ? null : query.get("example");
+const exampleId = query.get("src")
+  ? null
+  : query.get("example") ?? $("viewer").dataset.example;
 const requestedFps = Number(query.get("fps"));
 const fps =
   Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : null;

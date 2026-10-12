@@ -1,7 +1,7 @@
 # Bundled player source
 
 Source: [OpsiClear-4DGS/ftgs-player](https://github.com/OpsiClear-4DGS/ftgs-player).
-Revision: [`bc73995`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/bc73995bae3f21d7711f7d53ac8e92ca2c5134c2).
+Revision: [`4af9e12`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/4af9e12d87d424a7ae71da6a0fd0024600002ae4).
 
 `src/`, `site/`, the embedding hosts, TSOG tools, schema and synthetic
 conformance/browser checks come from this revision. Rendering and playback
@@ -14,8 +14,8 @@ Bundle differences:
 - Existing documentation URLs point to `docs/`.
 - The Jensen manifest points to the hosted TSOG; recorded model data, its
   screenshot, and standalone package/recorded-example tests are omitted.
-  The small social-card JPEG is bundled; the card opens the hosted interactive
-  4DGS scene.
+  The small social-card JPEG is bundled; image cards link to the hosted
+  interactive 4DGS scene page.
 - The README and development guide describe this bundled copy.
 
 When updating, preserve these compatibility aliases and local-file behavior,

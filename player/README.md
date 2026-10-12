@@ -31,17 +31,16 @@ iframe hosts, and show mode-specific integration code below the player with
 a Copy code button. The Jensen example is fetched only when selected; its 45 MB
 model is hosted in the standalone project. `?demo=1` uses a generated scene.
 
-The hosted player and example pages include static X Player Card and Open
-Graph tags with a 1200×675 thumbnail and no personal account attribution.
-The card's player URL opens the interactive Jensen 2M 4DGS scene with playback,
-camera navigation and its embedded audio. The thumbnail is bundled here; the
-full model remains hosted in the standalone project. X controls whether it
-opens the player inside its card, its in-app browser or a regular browser.
-The card starts paused; press Play to start playback with audio, avoiding
-audible autoplay as required by [X's card policy](https://docs.x.com/developer-terms/policy#x-cards).
-Browser checks cover cross-origin and opaque sandbox iframes. X acceptance
-still requires testing a real post in X clients.
-See the [thumbnail provenance](examples/assets/README.md).
+Share the [Jensen scene page](https://opsiclear-4dgs.github.io/ftgs-player/examples/jensen-2m.html)
+for an image link to the interactive 4DGS player. The scene page, main player
+and embedding examples include static `summary_large_image` and Open Graph
+tags with a 1200×675 thumbnail and no personal account attribution. The scene
+page starts paused with audio enabled; press Play to start playback. The
+thumbnail is bundled here; the full model remains hosted in the standalone
+project. X controls whether it shows a preview and whether links open in its
+in-app browser. Actual previews still require checking a real post in X.
+See the [thumbnail provenance](examples/assets/README.md). Browser checks also
+cover playback in cross-origin and opaque sandbox iframes.
 
 Code is **AGPL-3.0-only**. Retain [LICENSE](LICENSE) and
 [third-party notices](docs/THIRD_PARTY.md), including the bundled font licenses.

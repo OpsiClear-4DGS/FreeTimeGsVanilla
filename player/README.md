@@ -32,11 +32,12 @@ a Copy code button. The Jensen example is fetched only when selected; its 45 MB
 model is hosted in the standalone project. `?demo=1` uses a generated scene.
 
 The hosted player and example pages include static X Player Card and Open
-Graph tags, credited to **@Yeheliu**. They use a 1200×675 preview picture and a
-[five-second video preview](examples/social-player.html) with source audio.
-The light JPEG/MP4 assets are bundled here; the full interactive model remains
-hosted in the standalone project. X decides whether it shows inline playback
-or an image/link preview. See the [preview provenance](examples/assets/README.md).
+Graph tags with a 1200×675 thumbnail and no personal account attribution.
+The card's player URL opens the interactive Jensen 2M 4DGS scene with playback,
+camera navigation and its embedded audio. The thumbnail is bundled here; the
+full model remains hosted in the standalone project. X controls whether it
+opens the player inside its card, its in-app browser or a regular browser.
+See the [thumbnail provenance](examples/assets/README.md).
 
 Code is **AGPL-3.0-only**. Retain [LICENSE](LICENSE) and
 [third-party notices](docs/THIRD_PARTY.md), including the bundled font licenses.

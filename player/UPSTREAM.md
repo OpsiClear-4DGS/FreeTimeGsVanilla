@@ -1,7 +1,7 @@
 # Bundled player source
 
 Source: [OpsiClear-4DGS/ftgs-player](https://github.com/OpsiClear-4DGS/ftgs-player).
-Revision: [`c235a61`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/c235a614edf91f7817ef9c636fcf50afd4cd43e5).
+Revision: [`2944cf1`](https://github.com/OpsiClear-4DGS/ftgs-player/commit/2944cf18a513b2d797eef81fb22c997f51475a03).
 
 `src/`, `site/`, the embedding hosts, TSOG tools, schema and synthetic
 conformance/browser checks come from this revision. Rendering and playback
@@ -14,8 +14,8 @@ Bundle differences:
 - Existing documentation URLs point to `docs/`.
 - The Jensen manifest points to the hosted TSOG; recorded model data, its
   screenshot, and standalone package/recorded-example tests are omitted.
-  The small social-card JPEG and MP4 are bundled; their regeneration tool
-  remains in the standalone project, which retains the full TSOG.
+  The small social-card JPEG is bundled; the card opens the hosted interactive
+  4DGS scene.
 - `site/examples.js` uses a retried whole-file request for the hosted sample,
   since GitHub Pages does not expose Content-Range to other origins. The
   expected byte count is still checked; local assets use validated ranges.

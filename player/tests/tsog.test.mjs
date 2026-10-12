@@ -93,6 +93,84 @@ test("TSOG decodes 8-bit motion and SH palettes for degrees 1, 2 and 3", async (
   }
 });
 
+test("compact SH storage preserves all coefficients, motion and sampled points", async () => {
+  for (const bands of [0, 1, 2, 3]) for (const maxPoints of [Infinity, 2, 1]) {
+    const {meta, load} = fixture({bands});
+    const dense = await decodeTSOG(meta, load, {maxPoints});
+    const compact = await decodeTSOG(meta, load, {maxPoints, compactHarmonics:true});
+    const rest = dense.coefficients - 1;
+    assert.equal(compact.harmonicPointCount, dense.count >= (meta.shN?.count ?? 0) ? dense.count : 0);
+    assert.ok(compact.sh.byteLength <= dense.sh.byteLength, "sampling should never expand a larger palette");
+    for (const key of ['positionTime','velocityDuration','covarianceA','covarianceB','alpha'])
+      assert.deepEqual(compact[key], dense[key]);
+    for (let i = 0; i < compact.count; i++) for (let c = 0; c < compact.coefficients; c++) {
+      const offset = (compact.harmonicPointCount
+        ? c === 0 ? i : compact.count + compact.sh[i*4+3]*rest+c-1
+        : i*compact.coefficients+c) * 4;
+      for (let a = 0; a < 3; a++) assert.equal(compact.sh[offset+a], dense.sh[(i*dense.coefficients+c)*4+a]);
+    }
+  }
+});
+
+test("compact SH decoding rejects corrupt labels/codebook references and cancels during palette decode", async () => {
+  for (const edit of [f => f.images.labels.rgba[0] = 2, f => f.images.centroids.rgba[0] = 255]) {
+    const f = fixture({bands:3}); edit(f);
+    await assert.rejects(decodeTSOG(f.meta, f.load, {compactHarmonics:true}), /Invalid TSOG/);
+  }
+  const f = fixture({bands:3}), controller = new AbortController();
+  await assert.rejects(decodeTSOG(f.meta, f.load, {
+    compactHarmonics:true, signal:controller.signal,
+    onProgress: value => { if (value >= 0.85) controller.abort(); },
+  }), {name:'AbortError'});
+});
+
+test("large-model lookup preserves every 16-bit position code and rejects only used overflows", async () => {
+  const f = fixture({stationary:true}), count = 65536;
+  f.meta.count = count;
+  for (const img of Object.values(f.images)) {
+    const original = img.rgba;
+    img.width = img.height = 256;
+    img.rgba = new Uint8Array(count*4);
+    for (let i = 0; i < count; i++) img.rgba.set(original.subarray((i%4)*4, (i%4+1)*4), i*4);
+  }
+  for (let i = 0; i < count; i++) {
+    f.images.pl.rgba[i*4] = i & 255;
+    f.images.ph.rgba[i*4] = i >>> 8;
+  }
+  const decoded = await decodeTSOG(f.meta, f.load, {maxPoints:Infinity});
+  for (let i = 0; i < count; i++) {
+    const log = f.meta.means.mins[0] + ((f.meta.means.maxs[0]-f.meta.means.mins[0])*i)/65535;
+    assert.equal(decoded.positionTime[i*4], Math.fround(Math.sign(log)*Math.expm1(Math.abs(log))));
+  }
+  f.meta.means.mins[0] = 0; f.meta.means.maxs[0] = 1000;
+  for (let i = 0; i < count; i++) f.images.pl.rgba[i*4] = f.images.ph.rgba[i*4] = 0;
+  assert.equal((await decodeTSOG(f.meta, f.load, {maxPoints:Infinity})).positionTime[0], 0);
+  f.images.ph.rgba[0] = 255;
+  await assert.rejects(decodeTSOG(f.meta, f.load, {maxPoints:Infinity}), /float32 range/);
+});
+
+test("fallback scheduling lets an external cancellation interrupt large-model decoding", async () => {
+  const scheduler = Object.getOwnPropertyDescriptor(globalThis, 'scheduler');
+  Object.defineProperty(globalThis, 'scheduler', {value:undefined, configurable:true});
+  const f = fixture({stationary:true}), count = 65536;
+  f.meta.count = count;
+  for (const img of Object.values(f.images)) {
+    const original = img.rgba;
+    img.width = img.height = 256;
+    img.rgba = new Uint8Array(count*4);
+    for (let i = 0; i < count; i++) img.rgba.set(original.subarray((i%4)*4, (i%4+1)*4), i*4);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 0);
+  try {
+    await assert.rejects(decodeTSOG(f.meta, f.load, {maxPoints:Infinity, signal:controller.signal}), {name:'AbortError'});
+  } finally {
+    clearTimeout(timer);
+    if (scheduler) Object.defineProperty(globalThis, 'scheduler', scheduler);
+    else delete globalThis.scheduler;
+  }
+});
+
 test("discrete sorting isolates each frame; static splats never fade or move", async () => {
   const discrete = fixture({discrete:true});
   const model = await decodeTSOG(discrete.meta, discrete.load);

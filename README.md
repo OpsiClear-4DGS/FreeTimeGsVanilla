@@ -511,6 +511,10 @@ paused with audio enabled; press Play to start playback. X controls preview
 display and whether links open in its in-app browser. Actual previews require
 checking a real post in X.
 
+TSOG loading shares color centroids and reuses decoding buffers while retaining
+all Gaussians and SH coefficients. See the measured full-quality
+[loading improvements](player/docs/PERFORMANCE.md).
+
 See the [player documentation](player/docs/PLAYER.md) for controls, URL options,
 rendering limits, and tests. The repository-owned [TSOG module](player/docs/TSOG.md)
 documents the

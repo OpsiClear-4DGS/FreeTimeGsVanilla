@@ -32,6 +32,16 @@ is used only for tooling; browser playback has no package installation step.
 cleanup in cross-origin and opaque-origin iframes. This verifies browser
 compatibility; X card acceptance requires a real post and testing in X clients.
 
+To profile full-quality decoding and compare attribute/render hashes:
+
+```bash
+python player/tools/benchmark-loading.py --output /tmp/loading.json --capture
+```
+
+The bundled manifest downloads the hosted example before starting the decode
+timer. `--compare /tmp/baseline.json` requires exact logical attribute and frame
+hashes. See [PERFORMANCE.md](PERFORMANCE.md) for the stages and timing limits.
+
 The optional recorded example is hosted by the canonical project; local files
 and synthetic fixtures require no external assets. Preserve AGPL-3.0-only and
 all third-party notices when distributing either player.

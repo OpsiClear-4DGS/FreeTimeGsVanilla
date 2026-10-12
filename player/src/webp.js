@@ -1,6 +1,8 @@
 // Attribute images carry integer codes, including in RGB when alpha is small.
 // A 2D canvas would round those codes through premultiplied alpha.
 // Inspect the container without decoding pixels (also usable from Node.js).
+import { yieldToBrowser } from "./scheduling.js";
+
 export function inspectAttributeImage(bytes) {
   const fail = () => { throw new Error("Invalid TSOG: expected a still lossless WebP attribute image."); };
   const tag = (offset) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
@@ -43,6 +45,9 @@ export class AttributeImages {
       premultiplyAlpha: "none", colorSpaceConversion: "none", imageOrientation: "none",
     });
     try {
+      // Paired native decodes can finish together. Let input/paint run between
+      // their synchronous GPU readbacks, rather than blocking for both images.
+      await yieldToBrowser();
       signal?.throwIfAborted();
       if (!this.#gl) {
         const canvas = typeof OffscreenCanvas === "function"

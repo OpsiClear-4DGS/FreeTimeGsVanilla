@@ -79,7 +79,14 @@ def main():
                     imageCount++;
                   }
                 } finally { images.destroy(); }
-                const model = await readModel(blob, {maxPoints: Infinity});
+                const model = await readModel(blob, {maxPoints: Infinity, compactHarmonics:false});
+                const compact = await readModel(blob, {maxPoints: Infinity});
+                for (const key of ['positionTime','velocityDuration','covarianceA','covarianceB','alpha'])
+                  check(model[key].every((value, i) => value === compact[key][i]), name + ' compact ' + key);
+                for (let i = 0; i < compact.count; i++) for (let c = 0; c < compact.coefficients; c++) {
+                  const offset = (compact.harmonicPointCount ? c === 0 ? i : compact.count + compact.sh[i*4+3]*(compact.coefficients-1)+c-1 : i*compact.coefficients+c)*4;
+                  for (let a = 0; a < 3; a++) check(model.sh[(i*model.coefficients+c)*4+a] === compact.sh[offset+a], name + ' compact coefficients');
+                }
                 check(model.count === 256 && model.format === 'tsog', name + ' detected format/count');
                 const discrete = name === 'discrete.tsog', stationary = name === 'static.tsog';
                 check(model.timelineMode === (discrete ? 1 : stationary ? 2 : 0), 'timeline mode');

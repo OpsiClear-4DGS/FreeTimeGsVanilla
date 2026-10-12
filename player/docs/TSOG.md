@@ -16,6 +16,14 @@ packaging, and [webp.js](../src/webp.js) for byte-exact attribute images. It use
 browser WebP decoding and WebGL2, without a runtime
 package dependency. Existing `.ftgs.ply` loading remains available.
 
+The player automatically retains shared SH centroids in one GPU palette instead
+of expanding them for every Gaussian. This changes memory layout, with identical
+coefficients and rendering; it does not recompress the package or reduce SH
+degree. The low-level `readTSOG()` / `decodeTSOG()` API keeps dense coefficients
+by default; `compactHarmonics: true` requests the palette layout, whose
+`harmonicPointCount` gives the start of the shared centroids. Small point samples
+use dense storage when that requires less memory. [Performance notes](PERFORMANCE.md).
+
 For playback, start with the [player README](../README.md). For packaging, see
 [audio and playback metadata](#audio-and-playback-metadata) and the
 [command examples](#add-audio-or-change-defaults). For integration, use the

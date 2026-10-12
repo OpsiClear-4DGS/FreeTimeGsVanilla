@@ -11,7 +11,7 @@ uniform mat4 view, projection;
 uniform vec3 eye;
 uniform vec2 viewport, focal;
 uniform float time, nearPlane, opacityFloor;
-uniform int coefficients, shDegree, timelineMode;
+uniform int coefficients, shDegree, timelineMode, harmonicPointCount;
 uniform bool useVelocity;
 out vec2 gaussian;
 flat out vec4 color;
@@ -33,10 +33,12 @@ vec3 shColor(int index, vec3 d) {
   b[13]=-0.4570457994644658*x*(4.0*zz-xx-yy);
   b[14]=1.445305721320277*z*(xx-yy); b[15]=-0.5900435899266435*x*(xx-3.0*yy);
   vec3 rgb=vec3(0.5);
+  vec4 dc=load(harmonics,harmonicPointCount>0 ? index : index*coefficients);
   int bandCount=(shDegree+1)*(shDegree+1);
   for(int i=0;i<16;i++) {
     if(i>=bandCount) break;
-    rgb += b[i]*load(harmonics,index*coefficients+i).xyz;
+    int offset=harmonicPointCount>0 ? harmonicPointCount+int(dc.w)*(coefficients-1)+i-1 : index*coefficients+i;
+    rgb += b[i]*(i==0 ? dc.xyz : load(harmonics,offset).xyz);
   }
   return max(rgb,vec3(0.0));
 }
@@ -137,6 +139,7 @@ export class SplatRenderer {
         "nearPlane",
         "opacityFloor",
         "coefficients",
+        "harmonicPointCount",
         "shDegree",
         "useVelocity",
         "timelineMode",
@@ -233,6 +236,7 @@ export class SplatRenderer {
     this.textures.forEach((t) => this.gl.deleteTexture(t));
     this.textures = textures;
     this.coefficients = model.coefficients;
+    this.harmonicPointCount = model.harmonicPointCount ?? 0;
     this.useVelocity = model.useVelocity;
     this.opacityFloor = model.opacityFloor;
     this.timelineMode = model.timelineMode ?? 0;
@@ -289,6 +293,7 @@ export class SplatRenderer {
     gl.uniform2f(u.focal, width * projection[0] / 2, height * projection[5] / 2);
     gl.uniform1f(u.nearPlane, camera.near);
     gl.uniform1i(u.coefficients, this.coefficients);
+    gl.uniform1i(u.harmonicPointCount, this.harmonicPointCount);
     gl.uniform1i(u.shDegree, degree);
     gl.uniform1i(u.useVelocity, this.useVelocity ? 1 : 0);
     gl.uniform1i(u.timelineMode, this.timelineMode);

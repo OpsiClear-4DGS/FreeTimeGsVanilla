@@ -18,7 +18,7 @@ export function mountPlayerShell(viewer) {
     <section id="welcome" class="welcome" aria-labelledby="welcome-title">
       <div class="welcome-heading">
         <h1 id="welcome-title">FTGS Player</h1>
-        <nav id="welcome-links" aria-label="Player resources"><a href="./examples/embedding.html">Embedding</a><a href="https://github.com/OpsiClear-4DGS/ftgs-player">Source</a></nav>
+        <nav id="welcome-links" aria-label="Player resources"><a href="${new URL('../examples/embedding.html', import.meta.url).href}">Embedding</a><a href="https://github.com/OpsiClear-4DGS/ftgs-player">Source</a></nav>
       </div>
       <div class="welcome-choices">
         <button id="empty" class="empty" aria-label="Choose a .ftgs.ply or .tsog file">
@@ -27,7 +27,7 @@ export function mountPlayerShell(viewer) {
           <span class="empty-caption">or drop a .tsog or .ftgs.ply file</span>
         </button>
         <a class="example-link" href="?example=jensen-2m" aria-label="Play example scene">
-          <span class="example-preview"><img src="./site/assets/example.png" alt="" /></span>
+          <span class="example-preview"><img src="${new URL('./assets/example.png', import.meta.url).href}" alt="" /></span>
           <span class="example-description"><span class="example-title">Play example</span><span class="example-caption">5 seconds · audio · 45 MB</span></span>
           <span class="preview-play"><svg aria-hidden="true"><use href="#play" /></svg></span>
         </a>

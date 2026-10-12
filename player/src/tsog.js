@@ -1,8 +1,9 @@
 // Repository-owned TSOG v4 decoder, based on Xiaomi Research's format/encoder.
 // Paper, original repository, compatibility and licenses: ../docs/TSOG.md and ../docs/THIRD_PARTY.md.
-import { boundsForModel, covarianceFromQuaternion } from "./ftgs.js";
+import { boundsForModel, covarianceFromVariances } from "./ftgs.js";
 import { openZip } from "./zip.js";
 import { AttributeImages } from "./webp.js";
+import { yieldToBrowser } from "./scheduling.js";
 import {
   validatePlaybackMetadata,
   audioMimeType,
@@ -67,11 +68,10 @@ const finite = (value) => {
   return value;
 };
 
-function unpackQuaternion(bytes, offset) {
+function unpackQuaternion(bytes, offset, quaternion) {
   const omitted = bytes[offset + 3] - 252;
   if (omitted < 0 || omitted > 3)
     invalid("invalid smallest-three quaternion tag.");
-  const quaternion = [0, 0, 0, 0];
   let channel = 0;
   let squared = 0;
   for (let component = 0; component < 4; component++) {
@@ -174,7 +174,7 @@ export async function readTSOGMetadata(archive) {
 export async function decodeTSOG(
   meta,
   loadImage,
-  { maxPoints = 1000000, signal, onProgress = () => {} } = {},
+  { maxPoints = 1000000, compactHarmonics = false, signal, onProgress = () => {} } = {},
 ) {
   signal?.throwIfAborted();
   validateTSOGMetadata(meta);
@@ -183,6 +183,10 @@ export async function decodeTSOG(
   const count = Math.min(meta.count, maxPoints);
   const degree = meta.shN?.bands ?? 0;
   const coefficients = (degree + 1) ** 2;
+  // DC + label per point, then shared SH centroids. No coefficients are removed.
+  // Prefer dense storage when sampling fewer points than there are centroids.
+  compactHarmonics &&= count >= (meta.shN?.count ?? 0);
+  const harmonicPointCount = compactHarmonics ? count : 0;
   // Internal modes: 0 = continuous Gaussian, 1 = discrete frame, 2 = static.
   const timelineMode = !meta.timeline ? 2 : meta.timeline.type === 0 ? 1 : 0;
   const model = {
@@ -192,6 +196,7 @@ export async function decodeTSOG(
     sourceCount: meta.count,
     degree,
     coefficients,
+    harmonicPointCount,
     nFrames:
       timelineMode === 1 ? meta.timeline.N : timelineMode === 2 ? 1 : null,
     fps: meta.fps ?? null,
@@ -202,7 +207,9 @@ export async function decodeTSOG(
     velocityDuration: new Float32Array(count * 4),
     covarianceA: new Float32Array(count * 4),
     covarianceB: new Float32Array(count * 4),
-    sh: new Float32Array(count * coefficients * 4),
+    sh: new Float32Array((compactHarmonics
+      ? count + (meta.shN?.count ?? 0) * (coefficients - 1)
+      : count * coefficients) * 4),
     alpha: new Float32Array(count),
   };
   let dimensions;
@@ -226,59 +233,76 @@ export async function decodeTSOG(
     }
     return result;
   };
+  const together = async (...promises) => {
+    // Finish both decodes before cleanup, including when one image is corrupt.
+    const results = await Promise.allSettled(promises);
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
+    return results.map((result) => result.value);
+  };
   const pair = async (group) => {
-    const low = await image(group.files[0]);
-    const high = group.files[1] ? await image(group.files[1]) : null;
+    const [low, high] = await together(image(group.files[0]),
+      group.files[1] ? image(group.files[1]) : null);
     return [low.rgba, high?.rgba];
   };
-  const rows = async (operation, progress) => {
-    for (let first = 0; first < count; first += 16384) {
+  let previousProgress = 0;
+  const rows = async (operation, progress, total = count) => {
+    let deadline = performance.now() + 12;
+    for (let first = 0; first < total; first += 8192) {
       signal?.throwIfAborted();
-      for (let i = first; i < Math.min(first + 16384, count); i++)
+      const end = Math.min(first + 8192, total);
+      for (let i = first; i < end; i++)
         operation(i, 4 * Math.floor((i * meta.count) / count), i * 4);
-      // Let cancellation, navigation, and the loading UI run between chunks.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (performance.now() >= deadline || end === total) {
+        onProgress(previousProgress + (progress - previousProgress) * end / total);
+        await yieldToBrowser();
+        deadline = performance.now() + 12;
+      }
     }
     signal?.throwIfAborted();
-    onProgress(progress);
+    previousProgress = progress;
   };
   const value16 = (low, high, i, min, max) =>
     min + ((max - min) * (low[i] + 256 * high[i])) / 65535;
   {
     const [low, high] = await pair(meta.means);
+    // Large models reuse 16-bit signed-log codes millions of times.
+    const tables = count >= 65536 ? meta.means.mins.map((min, axis) => {
+      const table = new Float32Array(65536), max = meta.means.maxs[axis];
+      for (let code = 0; code < table.length; code++) {
+        const log = min + ((max - min) * code) / 65535;
+        table[code] = Math.sign(log) * Math.expm1(Math.abs(log));
+      }
+      return table;
+    }) : null;
     await rows((i, s, o) => {
       for (let a = 0; a < 3; a++) {
-        const log = value16(
-          low,
-          high,
-          s + a,
-          meta.means.mins[a],
-          meta.means.maxs[a],
-        );
-        model.positionTime[o + a] = finite(
-          Math.sign(log) * Math.expm1(Math.abs(log)),
-        );
+        if (tables) model.positionTime[o + a] = finite(tables[a][low[s + a] + 256 * high[s + a]]);
+        else {
+          const log = value16(low, high, s + a, meta.means.mins[a], meta.means.maxs[a]);
+          model.positionTime[o + a] = finite(Math.sign(log) * Math.expm1(Math.abs(log)));
+        }
       }
       model.velocityDuration[o + 3] = 1;
     }, 0.2);
   }
   {
-    const scales = (await image(meta.scales.files[0])).rgba;
-    const quats = (await image(meta.quats.files[0])).rgba;
+    const [scales, quats] = await pair({ files: [meta.scales.files[0], meta.quats.files[0]] });
+    const variances = Float64Array.from(meta.scales.codebook, (v) => Math.exp(2 * v));
+    const quaternion = new Float64Array(4), scale = new Float64Array(3), covariance = new Float64Array(6);
     await rows((i, s, o) => {
-      const covariance = covarianceFromQuaternion(
-        unpackQuaternion(quats, s),
-        [0, 1, 2].map((a) => lookup(meta.scales.codebook, scales[s + a])),
-      ).map(finite);
-      model.covarianceA.set(covariance.slice(0, 4), o);
-      model.covarianceB.set(covariance.slice(4), o);
+      for (let a = 0; a < 3; a++) scale[a] = lookup(variances, scales[s + a]);
+      covarianceFromVariances(unpackQuaternion(quats, s, quaternion), scale, covariance);
+      for (let a = 0; a < 4; a++) model.covarianceA[o + a] = finite(covariance[a]);
+      model.covarianceB[o] = finite(covariance[4]);
+      model.covarianceB[o + 1] = finite(covariance[5]);
     }, 0.4);
   }
   {
     const colors = (await image(meta.sh0.files[0])).rgba;
     await rows((i, s, o) => {
       for (let a = 0; a < 3; a++)
-        model.sh[i * coefficients * 4 + a] = lookup(
+        model.sh[(compactHarmonics ? i : i * coefficients) * 4 + a] = lookup(
           meta.sh0.codebook,
           colors[s + a],
         );
@@ -320,18 +344,27 @@ export async function decodeTSOG(
     }, 0.75);
   }
   if (meta.shN) {
-    const palette = await image(meta.shN.files[0], false);
-    const labels = (await image(meta.shN.files[1])).rgba;
+    const [palette, labelImage] = await together(image(meta.shN.files[0], false), image(meta.shN.files[1]));
+    const labels = labelImage.rgba;
     const rest = coefficients - 1;
     if (
       palette.width !== 64 * rest ||
       palette.height !== Math.ceil(meta.shN.count / 64)
     )
       invalid("invalid SH centroid image size.");
+    if (compactHarmonics) {
+      await rows((label) => {
+        for (let c = 0; c < rest; c++)
+          for (let a = 0; a < 3; a++)
+            model.sh[(count + label * rest + c) * 4 + a] = lookup(
+              meta.shN.codebook, palette.rgba[(label * rest + c) * 4 + a]);
+      }, 0.85, meta.shN.count);
+    }
     await rows((i, s) => {
       const label = labels[s] + 256 * labels[s + 1];
       if (label >= meta.shN.count)
         invalid("an SH label exceeds the palette count.");
+      if (compactHarmonics) { model.sh[i * 4 + 3] = label; return; }
       for (let c = 0; c < rest; c++)
         for (let a = 0; a < 3; a++)
           model.sh[(i * coefficients + c + 1) * 4 + a] = lookup(

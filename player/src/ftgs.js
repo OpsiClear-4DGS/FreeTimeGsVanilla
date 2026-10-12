@@ -92,34 +92,24 @@ export function parseHeader(text) {
 }
 
 export function covarianceFromQuaternion(q, logScales) {
-  const norm = Math.hypot(...q);
+  return covarianceFromVariances(q, logScales.map((v) => Math.exp(2 * v)));
+}
+
+/** Same covariance calculation with cached scale variances and reusable output. */
+export function covarianceFromVariances(q, s, out = new Array(6)) {
+  const norm = Math.hypot(q[0], q[1], q[2], q[3]);
   if (!(norm > 0)) throw new Error("A Gaussian has a zero quaternion.");
-  const [w, x, y, z] = q.map((v) => v / norm);
-  const R = [
-    1 - 2 * (y * y + z * z),
-    2 * (x * y - w * z),
-    2 * (x * z + w * y),
-    2 * (x * y + w * z),
-    1 - 2 * (x * x + z * z),
-    2 * (y * z - w * x),
-    2 * (x * z - w * y),
-    2 * (y * z + w * x),
-    1 - 2 * (x * x + y * y),
-  ];
-  const s = logScales.map((v) => Math.exp(2 * v));
-  return [
-    [0, 0],
-    [0, 1],
-    [0, 2],
-    [1, 1],
-    [1, 2],
-    [2, 2],
-  ].map(
-    ([a, b]) =>
-      R[3 * a] * R[3 * b] * s[0] +
-      R[3 * a + 1] * R[3 * b + 1] * s[1] +
-      R[3 * a + 2] * R[3 * b + 2] * s[2],
-  );
+  const w = q[0] / norm, x = q[1] / norm, y = q[2] / norm, z = q[3] / norm;
+  const r0 = 1 - 2 * (y * y + z * z), r1 = 2 * (x * y - w * z), r2 = 2 * (x * z + w * y);
+  const r3 = 2 * (x * y + w * z), r4 = 1 - 2 * (x * x + z * z), r5 = 2 * (y * z - w * x);
+  const r6 = 2 * (x * z - w * y), r7 = 2 * (y * z + w * x), r8 = 1 - 2 * (x * x + y * y);
+  out[0] = r0 * r0 * s[0] + r1 * r1 * s[1] + r2 * r2 * s[2];
+  out[1] = r0 * r3 * s[0] + r1 * r4 * s[1] + r2 * r5 * s[2];
+  out[2] = r0 * r6 * s[0] + r1 * r7 * s[1] + r2 * r8 * s[2];
+  out[3] = r3 * r3 * s[0] + r4 * r4 * s[1] + r5 * r5 * s[2];
+  out[4] = r3 * r6 * s[0] + r4 * r7 * s[1] + r5 * r8 * s[2];
+  out[5] = r6 * r6 * s[0] + r7 * r7 * s[1] + r8 * r8 * s[2];
+  return out;
 }
 
 export function boundsForModel(positionTime) {

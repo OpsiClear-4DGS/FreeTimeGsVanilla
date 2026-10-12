@@ -17,6 +17,11 @@ Playback uses borderless icon controls below the scene, with seeking, speed,
 audio and bottom-right fullscreen. Audio starts enabled; press Play if the
 browser blocks autoplay with sound. Local files stay in your browser.
 
+TSOG loading preserves shared SH palettes and reuses decoding buffers without
+removing Gaussians or coefficients. The full Jensen example's measured decode
+plus upload time fell from 5.91 s to 1.06 s in headless Chromium.
+[Loading benchmarks and quality checks](docs/PERFORMANCE.md).
+
 - [Controls, URL settings, audio and AR](docs/PLAYER.md)
 - [Canvas and iframe APIs](docs/API.md), [embedding examples](examples/embedding.html)
 - [FTGS format](docs/FORMAT.md), [TSOG guide](docs/TSOG.md),

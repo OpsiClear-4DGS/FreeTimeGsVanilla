@@ -48,7 +48,7 @@ def main():
             page.goto(url + "/host.html")
             page.evaluate('''async () => {
               const {FTGSPlayer} = await import('./player.js');
-              const {demoFile} = await import('./demo.js');
+              const {demoFile} = await import('./site/demo.js');
               Object.assign(window, {FTGSPlayer, demo: demoFile(), xr: navigator.xr});
               window.check = (value, message) => { if (!value) throw new Error(message); };
               window.wait = () => new Promise(resolve => setTimeout(resolve, 100));
@@ -196,6 +196,7 @@ def main():
             assert "surface" in page.locator("#ar-hint").inner_text()
             page.evaluate("navigator.xr.session.dispatchEvent(new Event('select'))")
             assert "Placed" in page.locator("#ar-hint").inner_text()
+            page.locator("#more-controls").click()
             page.locator("#reset-view").click()
             assert "Placed" not in page.locator("#ar-hint").inner_text()
             page.locator("#ar").click()
@@ -207,8 +208,8 @@ def main():
             page.wait_for_function("document.querySelector('#ar').hidden")
             print("PASS: AR button gesture, mobile layout, overlay controls, reposition/exit and unsupported-device fallback", flush=True)
 
-            # The iframe demo explicitly delegates XR and enters in the child.
-            page.goto(url + "/examples/embedding.html?mode=iframe")
+            # AR requires a gesture inside the child, so select its native toolbar.
+            page.goto(url + "/examples/embedding.html?mode=iframe&ui=player")
             frame = page.frame_locator("iframe")
             frame.locator('#viewer[data-loaded="true"]').wait_for()
             assert "xr-spatial-tracking" in page.locator("iframe").get_attribute("allow")
@@ -219,7 +220,7 @@ def main():
             page.goto(url + "/host.html")
             page.evaluate('''async childURL => {
               const {FTGSEmbed} = await import('./embed.js');
-              const {demoFile} = await import('./demo.js');
+              const {demoFile} = await import('./site/demo.js');
               const frame = document.createElement('iframe');
               frame.allow = 'xr-spatial-tracking';
               frame.style.cssText = 'width:320px;height:480px';

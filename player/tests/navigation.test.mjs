@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OrbitCamera } from "../camera.js";
+import { OrbitCamera } from "../src/camera.js";
 
 const close = (actual, expected) =>
   actual.forEach((value, i) =>

@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { decodeTSOG, validateTSOGMetadata, TSOG_PROFILE } from "../tsog.js";
-import { resolvePlayback } from "../playback.js";
-import { openZip } from "../zip.js";
-import { inspectAttributeImage } from "../webp.js";
-import { packageTSOG } from "../tsog-package.js";
-import { validateTSOGPackage } from "../tsog-validate.js";
+import { decodeTSOG, validateTSOGMetadata, TSOG_PROFILE } from "../src/tsog.js";
+import { resolvePlayback } from "../src/playback.js";
+import { openZip } from "../src/zip.js";
+import { inspectAttributeImage } from "../src/webp.js";
+import { packageTSOG } from "../src/tsog-package.js";
+import { validateTSOGPackage } from "../src/tsog-validate.js";
 import { toneFile } from "./audio-fixture.mjs";
 
 const fixture = (name) => new URL(`./fixtures/tsog/${name}`, import.meta.url);

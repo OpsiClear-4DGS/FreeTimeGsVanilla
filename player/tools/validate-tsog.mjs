@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
-import { validateTSOGPackage } from "../tsog-validate.js";
+import { validateTSOGPackage } from "../src/tsog-validate.js";
 
 const usage = `Usage: node tools/validate-tsog.mjs scene.tsog [--require-profile] [--json]
 Checks metadata, timing, referenced entries, ZIP checksums and lossless WebP headers.
-Image pixels and audio codecs are not decoded. See TSOG-SPEC.md for full checks.
+Image pixels and audio codecs are not decoded. See docs/TSOG-SPEC.md for full checks.
 --require-profile  Require an explicit TSOG Playback Profile 1 declaration
 --json             Print a machine-readable result
 Exit status: 0 passes these checks; 1 invalid input or command error.`;

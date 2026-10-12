@@ -1,8 +1,53 @@
 {
-  "name": "ftgs-player",
+  "name": "@opsiclear/ftgs-player",
+  "version": "0.1.0",
+  "description": "Reusable WebGL2 player for animated FTGS and TSOG scenes, with canvas and iframe APIs",
+  "license": "AGPL-3.0-only",
+  "homepage": "https://opsiclear-4dgs.github.io/ftgs-player/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OpsiClear-4DGS/ftgs-player.git"
+  },
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./player": "./src/player.js",
+    "./embed": "./src/embed.js",
+    "./tsog": "./src/tsog.js",
+    "./ftgs": "./src/ftgs.js",
+    "./package": "./src/tsog-package.js",
+    "./validate": "./src/tsog-validate.js",
+    "./schema": "./tsog.schema.json"
+  },
+  "files": [
+    "src/",
+    "index.js",
+    "player.js",
+    "embed.js",
+    "docs/",
+    "tsog.schema.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": [
+    "./src/sort-worker.js"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "tsog",
+    "freetimegs",
+    "4dgs",
+    "gaussian-splatting",
+    "webgl2",
+    "webxr"
+  ],
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "build": "node tools/build-site.mjs",
+    "serve": "python3 -m http.server 8765 --bind 127.0.0.1",
+    "validate:fixtures": "node tools/validate-tsog.mjs tests/fixtures/tsog/continuous16.tsog"
   }
 }

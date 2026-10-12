@@ -140,7 +140,7 @@ FreeTimeGsVanilla/
 │   ├── traj.py                   # Camera trajectory generation
 │   └── read_write_model.py       # COLMAP binary/text I/O
 │
-├── player/                       # Browser player, canvas/iframe APIs, and format docs
+├── player/                       # Bundled ftgs-player, canvas/iframe APIs, and format docs
 │   └── tools/package-tsog.mjs    # Add audio and playback defaults to a .tsog package
 │
 ├── run_pipeline.sh               # Full pipeline (combine + train)
@@ -437,8 +437,10 @@ python -m http.server 8765 --bind 127.0.0.1 --directory player
 ```
 
 Open <http://localhost:8765> and drop a file onto the page. Local files stay in
-the browser. The scene fills the window, with a timeline and controls that fade
-when idle. Play, pause, seek, change speed, orbit/pan/zoom, or move with WASD
+the browser. The scene fills the window, with compact borderless controls below
+it that fade during playback. Canvas and iframe examples share speed controls
+and bottom-right fullscreen. Play, pause, seek, change speed, orbit/pan/zoom, or
+move with WASD
 (Q/E down/up; Shift moves faster). The default preview loads up to 1 million
 Gaussians; use `?points=all` for full detail when GPU memory allows.
 
@@ -453,7 +455,8 @@ A `.tsog` may store clip duration, FPS, playback speed, looping, and audio
 volume in `meta.json`, alongside one optional audio file in the same ZIP.
 The player applies those defaults and keeps audio aligned through play, pause,
 seek, and loop. The sound button (M) enables or mutes audio; desktop users can
-adjust volume. If the browser blocks sound, click **Enable audio**.
+adjust volume. Audio starts enabled; if the browser blocks sound, press **Play**
+to start the scene and its audio together.
 
 For an existing continuous TSOG animation, package a soundtrack from this
 repository's root with Node.js 22+:
@@ -466,7 +469,7 @@ node player/tools/package-tsog.mjs scene.tsog scene-with-audio.tsog \
 The command copies the scene attributes and audio without re-encoding them.
 Omit `--audio` to update defaults while retaining the track; `--remove-audio`
 removes it. Use a new output filename. See the
-[metadata and packaging guide](player/TSOG.md#audio-and-playback-metadata)
+[metadata and packaging guide](player/docs/TSOG.md#audio-and-playback-metadata)
 for field definitions, discrete/static timing, supported audio types, and API usage.
 
 Use `?src=scene.tsog&speed=1.5&loop=0` to override playback for a link.
@@ -475,7 +478,7 @@ Older packages keep their existing defaults. Audio and playback metadata are
 optional TSOG extensions; the `.ftgs.ply` layout is unchanged.
 
 The extensions are now specified as
-[TSOG Playback Profile 1](player/TSOG-SPEC.md), with a
+[TSOG Playback Profile 1](player/docs/TSOG-SPEC.md), with a
 [metadata schema](player/tsog.schema.json) and
 [synthetic conformance corpus](player/tests/fixtures/tsog/CONFORMANCE.md).
 New packages declare the profile; older v4 files remain readable. Check metadata,
@@ -487,20 +490,20 @@ Omit the flag for legacy files; full attribute validation is documented in the s
 
 On compatible devices, the **AR** button opens a WebXR session with tap-to-place
 and animated playback. Use HTTPS (or localhost); see the
-[AR controls and setup](player/README.md#view-in-ar).
+[AR controls and setup](player/docs/PLAYER.md#view-in-ar).
 
-The [embedding API](player/API.md) supports independent canvas instances and
+The [embedding API](player/docs/API.md) supports independent canvas instances and
 iframe controls, including `load`, `play`, `pause`, `seek`, `setPlaybackRate`,
 `setMuted`, `setVolume`, events, and `destroy`. It includes canvas, iframe, and
 React examples. An iframe with audio and AR should use
 `allow="autoplay; xr-spatial-tracking"` and keep controls available for user gestures.
 
-See the [player documentation](player/README.md) for controls, URL options,
-rendering limits, and tests. The repository-owned [TSOG module](player/TSOG.md)
+See the [player documentation](player/docs/PLAYER.md) for controls, URL options,
+rendering limits, and tests. The repository-owned [TSOG module](player/docs/TSOG.md)
 documents the
 [TSOG paper](https://arxiv.org/abs/2607.28049),
 [Xiaomi Research's repository](https://github.com/xiaomi-research/tsog), and
-[license notices](player/THIRD_PARTY.md).
+[license notices](player/docs/THIRD_PARTY.md).
 
 ## Python/CUDA 4D Viewer
 

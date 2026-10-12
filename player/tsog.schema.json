@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://opsiclear-4dgs.github.io/ftgs-player/tsog.schema.json",
   "title": "TSOG Playback Profile 1 metadata (including legacy v4 imports)",
-  "description": "Structural constraints only. TSOG-SPEC.md defines cross-field, archive, pixel and playback requirements. Conforming new writers must include profile; legacy readers may accept its absence.",
+  "description": "Structural constraints only. docs/TSOG-SPEC.md defines cross-field, archive, pixel and playback requirements. Conforming new writers must include profile; legacy readers may accept its absence.",
   "type": "object",
   "required": ["version", "count", "means", "scales", "quats", "sh0"],
   "properties": {

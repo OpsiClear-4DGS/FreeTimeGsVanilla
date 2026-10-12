@@ -2,7 +2,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { parseArgs } from "node:util";
-import { packageTSOG } from "../tsog-package.js";
+import { packageTSOG } from "../src/tsog-package.js";
 
 const usage = `Usage: node tools/package-tsog.mjs input.tsog output.tsog [options]
   --audio track.mp3    Add or replace the embedded audio file

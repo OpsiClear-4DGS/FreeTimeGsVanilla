@@ -44,13 +44,13 @@ def main():
             page.goto(url + "?autoplay=0")
             result = page.evaluate("""async () => {
               const check = (ok, message) => { if (!ok) throw new Error(message); };
-              const {openZip} = await import('./zip.js');
-              const {AttributeImages} = await import('./webp.js');
-              const {readModel} = await import('./model.js');
+              const {openZip} = await import('./src/zip.js');
+              const {AttributeImages} = await import('./src/webp.js');
+              const {readModel} = await import('./src/model.js');
               const {tsogRow} = await import('./tests/tsog-source.mjs');
-              const {covarianceFromQuaternion} = await import('./ftgs.js');
-              const {validateTSOGPackage} = await import('./tsog-validate.js');
-              const {packageTSOG} = await import('./tsog-package.js');
+              const {covarianceFromQuaternion} = await import('./src/ftgs.js');
+              const {validateTSOGPackage} = await import('./src/tsog-validate.js');
+              const {packageTSOG} = await import('./src/tsog-package.js');
               const path = './tests/fixtures/tsog/';
               const hashes = await (await fetch(path + 'image-hashes.json')).json();
               let imageCount = 0;

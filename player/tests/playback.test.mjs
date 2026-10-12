@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolvePlayback, validatePlaybackMetadata, audioMimeType } from "../playback.js";
-import { packageTSOG } from "../tsog-package.js";
-import { openZip } from "../zip.js";
+import { resolvePlayback, validatePlaybackMetadata, audioMimeType } from "../src/playback.js";
+import { packageTSOG } from "../src/tsog-package.js";
+import { openZip } from "../src/zip.js";
 import { toneFile } from "./audio-fixture.mjs";
 
 const source = async (name = "continuous16") =>

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { inversePlacement, multiply4, placementMatrix, previewPose, xrCamera } from "../xr.js";
+import { inversePlacement, multiply4, placementMatrix, previewPose, xrCamera } from "../src/xr.js";
 
 const identity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
 const close = (a, b) => {

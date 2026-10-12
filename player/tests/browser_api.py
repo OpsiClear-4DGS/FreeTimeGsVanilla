@@ -91,7 +91,7 @@ def main():
               window.check = (condition, message) => { if (!condition) throw new Error(message); };
               const {FTGSPlayer} = await import('/ftgs-player/player.js');
               const {FTGSEmbed} = await import('/ftgs-player/embed.js');
-              const {demoFile} = await import('/ftgs-player/demo.js');
+              const {demoFile} = await import('/ftgs-player/site/demo.js');
               Object.assign(window, {FTGSPlayer, FTGSEmbed, demo: demoFile()});
               window.live = {workers: new Set(), frames: new Set(), observers: new Set()};
               window.sortDelay = 0;
@@ -337,24 +337,42 @@ def main():
             }''', child)
             assert not errors, errors
             print("PASS: cross-origin iframe API, host-relative URLs with CORS, events, origin/source checks, resize, failure/reconnect/cleanup", flush=True)
+            page.add_init_script('''(() => {
+              const dispatch = EventTarget.prototype.dispatchEvent;
+              EventTarget.prototype.dispatchEvent = function(event) {
+                if (event.detail && typeof event.detail.playbackRate === 'number') window.exampleState = event.detail;
+                return dispatch.call(this, event);
+              };
+            })()''')
             for mode in ["canvas", "iframe"]:
                 page.goto(host + prefix + "examples/embedding.html?mode=" + mode)
                 if mode == "iframe":
                     page.wait_for_function("document.querySelector('iframe')?.contentWindow !== null")
                     page.frame_locator("iframe").locator('#viewer[data-loaded="true"]').wait_for()
-                    view = page.frames[1]
-                else:
-                    page.locator('#viewer[data-loaded="true"]').wait_for()
-                    view = page
-                view.locator("#play-toggle").click()
-                view.wait_for_function("Number(document.querySelector('#timeline').value) > .03")
-                view.locator("#play-toggle").click()
-                view.locator("#timeline").evaluate("el => { el.value = .5; el.dispatchEvent(new Event('input')); }")
-                view.wait_for_function("Number(document.querySelector('#timeline').value) === .5")
+                    assert not page.frame_locator("iframe").locator("#controls").is_visible()
+                page.locator('#viewer[data-loaded="true"]').wait_for()
+                page.locator("#play-toggle").click()
+                page.wait_for_function("Number(document.querySelector('#timeline').value) > .03")
+                page.locator("#play-toggle").click()
+                page.locator("#timeline").evaluate("el => { el.value = .5; el.dispatchEvent(new Event('input')); }")
+                page.wait_for_function("Number(document.querySelector('#timeline').value) === .5")
+                page.locator("#playback-rate").select_option("2")
+                page.wait_for_function("window.exampleState?.playbackRate === 2")
+                assert page.locator("#playback-rate").input_value() == "2"
+                stage = page.locator("#player-stage").bounding_box()
+                full = page.locator("#fullscreen").bounding_box()
+                assert stage["x"] + stage["width"] - full["x"] - full["width"] <= 20
+                assert stage["y"] + stage["height"] - full["y"] - full["height"] <= 20
+                page.locator("#fullscreen").click()
+                page.wait_for_function("document.fullscreenElement?.id === 'player-stage'")
+                assert page.locator("#controls").is_visible()
+                assert page.locator("#fullscreen").get_attribute("aria-label") == "Exit fullscreen"
+                page.locator("#fullscreen").click()
+                page.wait_for_function("document.fullscreenElement === null")
                 assert page.title().endswith("FTGS Player")
-                assert view.locator("#message").inner_text() == ""
+                assert page.locator("#message").inner_text() == ""
             assert not errors, errors
-            print("PASS: runnable canvas and iframe documentation examples", flush=True)
+            print("PASS: canvas and iframe examples, speed changes, bottom-right fullscreen and controls during fullscreen", flush=True)
             browser.close()
     finally:
         for server in servers:

@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseHeader, readFTGS, covarianceFromQuaternion } from "../ftgs.js";
-import { sortVisible } from "../sort.js";
-import { lookAt, OrbitCamera } from "../camera.js";
-import { demoFile } from "../demo.js";
+import { parseHeader, readFTGS, covarianceFromQuaternion } from "../src/ftgs.js";
+import { sortVisible } from "../src/sort.js";
+import { lookAt, OrbitCamera } from "../src/camera.js";
+import { demoFile } from "../site/demo.js";
 
 function fixture({
   n = 4,

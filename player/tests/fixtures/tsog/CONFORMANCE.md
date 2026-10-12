@@ -1,7 +1,7 @@
 # TSOG Playback Profile 1 conformance corpus
 
-All data here is synthetic. See [the specification](../../../TSOG-SPEC.md) for
-normative requirements and [the guide](../../../TSOG.md#original-work-and-licensing)
+All data here is synthetic. See [the specification](../../../docs/TSOG-SPEC.md) for
+normative requirements and [the guide](../../../docs/TSOG.md#original-work-and-licensing)
 for source attribution and licenses. No captured scene or recorded audio is used.
 
 ## Portable cases

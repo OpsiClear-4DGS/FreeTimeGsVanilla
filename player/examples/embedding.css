@@ -1,0 +1,35 @@
+body { margin: 0; padding: 32px 24px; }
+main { max-width: 1120px; margin: auto; }
+.example-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+h1 { margin: 0; font-size: 24px; font-weight: 500; letter-spacing: -.4px; }
+#description { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; }
+.example-heading > a { font-size: 12px; white-space: nowrap; }
+nav { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.modes { display: flex; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--bg-secondary); }
+.modes a { padding: 6px 16px; border-radius: var(--radius); font-size: 13px; }
+.modes [aria-current="page"] { color: var(--text-primary); background: var(--bg-hover); }
+nav .button { min-height: 36px; font-size: 13px; }
+.player-link { margin-left: auto; font-size: 12px; }
+.player-stage { display: flex; flex-direction: column; height: min(72dvh, 680px); min-height: 320px; overflow: hidden; border: 1px solid var(--border-color); border-radius: var(--radius-lg); background: var(--bg-void); }
+#viewer { display: grid; flex: 1; min-height: 0; }
+canvas, iframe { display: block; align-self: center; width: 100%; height: 100%; min-height: 0; border: 0; touch-action: none; }
+canvas { max-height: 150vw; }
+.symbols { position: absolute; width: 0; height: 0; overflow: hidden; }
+.controls { position: relative; container: playback / inline-size; padding: 4px 12px 8px; background: var(--bg-void); }
+.player-stage:fullscreen { width: 100%; height: 100dvh; min-height: 0; border: 0; border-radius: 0; }
+.player-stage:fullscreen::backdrop { background: var(--bg-void); }
+.player-stage:fullscreen .controls { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+#message { margin: 12px 0 0; color: var(--error); overflow-wrap: anywhere; font-size: 13px; }
+#message[data-state="loading"] { color: var(--text-secondary); }
+#message:empty { display: none; }
+@media (max-width: 600px) {
+  body { padding: 20px 12px; }
+  .example-heading { margin-bottom: 20px; }
+  h1 { font-size: 21px; }
+  #description { font-size: 12px; }
+  nav { gap: 8px; }
+  .modes a { padding: 9px 12px; }
+  .player-link { width: 100%; margin-top: 4px; }
+  .player-stage { height: 68dvh; }
+  .controls { padding: 6px 8px; }
+}

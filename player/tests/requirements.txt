@@ -1,0 +1,4 @@
+# Optional test tools; the browser player has no runtime dependencies.
+playwright>=1.54,<2
+Pillow>=11,<13
+jsonschema>=4.23,<5

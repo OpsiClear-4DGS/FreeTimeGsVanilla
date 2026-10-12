@@ -1,0 +1,35 @@
+{
+  "id": "jensen-2m",
+  "title": "Jensen \u00b7 2M Gaussians",
+  "file": "https://opsiclear-4dgs.github.io/ftgs-player/examples/assets/jensen-2m.tsog",
+  "points": 2000000,
+  "frames": 121,
+  "fps": 24,
+  "duration": 5,
+  "bytes": 45106423,
+  "sha256": "df27dd645ebed2fd553973e4b0da8fcf2caf7138711a8e76910d61adacd33f05",
+  "audio": true,
+  "view": {
+    "eye": [
+      -1.8712759120020905e-10,
+      -0.2773500680923462,
+      0.9607689380645752
+    ],
+    "target": [
+      -1.8712764671136028e-10,
+      -0.2773500680923462,
+      -0.039231061935424805
+    ],
+    "up": "y",
+    "fov": 42.075022050843636
+  },
+  "provenance": {
+    "project": "https://github.com/OpsiClear-4DGS/sam3dbx4danyone",
+    "dataset": "Original Base36 Jensen",
+    "recipe": "2M zero-velocity cold initialization; original 1M movement units",
+    "fitting_seed": 2042,
+    "checkpoint_sha256": "180db182d3fa7662b9281064b4bb1e4904ae4e45c2b7033f6d5c5879d5080436",
+    "study": "base36-budget2m-20261010-234756",
+    "reference": "Excluded Camera00 validation; generated inputs, not captured physical ground truth"
+  }
+}

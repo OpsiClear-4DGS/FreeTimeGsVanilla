@@ -17,7 +17,7 @@ def main():
     # All media is generated in memory. No recorded scene or audio is used.
     bundle = subprocess.check_output(["node", "--input-type=module", "-e", """
       import { readFile } from 'node:fs/promises';
-      import { packageTSOG } from './tsog-package.js';
+      import { packageTSOG } from './src/tsog-package.js';
       import { toneFile } from './tests/audio-fixture.mjs';
       const blob = await packageTSOG(new Blob([await readFile('tests/fixtures/tsog/continuous16.tsog')]), {
         audio: toneFile(), playback: {duration:4, fps:24, rate:1.25, loop:false}, volume:0.4,
@@ -100,12 +100,16 @@ def main():
             page.keyboard.press("m")
             assert page.evaluate("audioElements[0].muted")
             page.set_viewport_size({"width": 320, "height": 600})
+            page.locator("#more-controls:not([hidden])").wait_for()
             page.evaluate("document.querySelector('#ar').hidden = false")
             boxes = page.locator(".transport > :not([hidden])").evaluate_all("""els => els
               .filter(e => getComputedStyle(e).display !== 'none')
-              .map(e => ({id:e.id, left:e.getBoundingClientRect().left, right:e.getBoundingClientRect().right}))""")
+              .map(e => ({id:e.id, left:e.getBoundingClientRect().left, right:e.getBoundingClientRect().right,
+                top:e.getBoundingClientRect().top, bottom:e.getBoundingClientRect().bottom}))""")
             assert all(b["left"] >= 0 and b["right"] <= 320 for b in boxes), boxes
-            assert all(a["right"] <= b["left"] + 1 for a, b in zip(boxes, boxes[1:])), boxes
+            for i, a in enumerate(boxes):
+                for b in boxes[i + 1:]:
+                    assert min(a["right"], b["right"]) <= max(a["left"], b["left"]) + 1 or min(a["bottom"], b["bottom"]) <= max(a["top"], b["top"]) + 1, boxes
 
             # Canvas API: real media clock, rate, seek, final stop, replay, URL cleanup.
             page.goto(url + "host.html")
@@ -138,7 +142,7 @@ def main():
               if (audioURLs.size !== 1 || !audioElements[0].paused) throw new Error('Failed-load audio cleanup');
               await player.load('./tests/fixtures/tsog/static.tsog');
               if (audioURLs.size || player.state.audio.available) throw new Error('Track not released');
-              const {packageTSOG} = await import('./tsog-package.js');
+              const {packageTSOG} = await import('./src/tsog-package.js');
               await player.load(await packageTSOG(bundle, {playback:{loop:true}}));
               player.setPlaybackRate(1); player.seek(0.99); player.play();
             }""")
@@ -146,7 +150,7 @@ def main():
 
             # An audio track shorter than the scene ends once and restarts on the scene's loop.
             page.evaluate("""async () => {
-              const {packageTSOG} = await import('./tsog-package.js');
+              const {packageTSOG} = await import('./src/tsog-package.js');
               const {toneFile} = await import('./tests/audio-fixture.mjs');
               await player.load(await packageTSOG(bundle, {audio:toneFile(0.2), playback:{duration:0.8, loop:true}}));
               player.play();
@@ -156,7 +160,7 @@ def main():
 
             # Static scenes can carry a timed soundtrack; unknown codecs fail only the audio.
             page.evaluate("""async () => {
-              const {packageTSOG} = await import('./tsog-package.js');
+              const {packageTSOG} = await import('./src/tsog-package.js');
               const {toneFile} = await import('./tests/audio-fixture.mjs');
               const still = await (await fetch('./tests/fixtures/tsog/static.tsog')).blob();
               await player.load(await packageTSOG(still, {audio:toneFile(), playback:{duration:4}}));

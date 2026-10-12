@@ -20,12 +20,18 @@ def main():
     args = parser.parse_args()
     if args.model:
         args.model = args.model.resolve(strict=True)
+    # A project site has a path prefix; root-relative module and model URLs must fail.
+    base_path = "/ftgs-player/"
 
     class Handler(SimpleHTTPRequestHandler):
         def log_message(self, *_args):
             pass
 
         def do_GET(self):
+            if not self.path.startswith(base_path):
+                self.send_error(404)
+                return
+            self.path = "/" + self.path[len(base_path):]
             if self.path == "/test-model.ftgs.ply" and args.model:
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
@@ -40,7 +46,7 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=str(root)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    url = f"http://127.0.0.1:{server.server_port}"
+    url = f"http://127.0.0.1:{server.server_port}{base_path}"
     if args.screenshots:
         args.screenshots.mkdir(parents=True, exist_ok=True)
 
@@ -52,7 +58,7 @@ def main():
 
     def drop_demo(page):
         transfer = page.evaluate_handle("""async () => {
-          const {demoFile} = await import('/demo.js');
+          const {demoFile} = await import('./site/demo.js');
           const transfer = new DataTransfer();
           transfer.items.add(new File([demoFile()], 'ribbon.ftgs.ply'));
           return transfer;
@@ -114,7 +120,7 @@ def main():
             page.mouse.move(110, 110)
             page.wait_for_function("getComputedStyle(document.querySelector('#controls')).opacity === '1'")
             projection = page.evaluate("""async () => {
-              const {SplatRenderer} = await import('/renderer.js');
+              const {SplatRenderer} = await import('./src/renderer.js');
               const canvas = document.createElement('canvas');
               canvas.style.cssText = 'position:fixed;left:-1000px;width:64px;height:64px';
               document.body.append(canvas);
@@ -175,7 +181,7 @@ def main():
                 chooser.value.set_files(args.model)
                 page.wait_for_function("name => document.title.startsWith(name)", arg=args.model.name)
                 ready(page)
-                page.goto(f"{url}/?src=/test-model.ftgs.ply&points=all")
+                page.goto(f"{url}?src=test-model.ftgs.ply&points=all")
                 ready(page)
                 assert page.title().startswith("test-model.ftgs.ply")
                 drop_demo(page)
@@ -190,12 +196,15 @@ def main():
             drop_demo(mobile)
             seek(mobile, 0.3)
             assert mobile.evaluate("document.documentElement.scrollWidth") == 390
-            assert mobile.locator("#canvas").bounding_box()["height"] == 844
+            scene_box = mobile.locator("#canvas").bounding_box()
+            controls_box = mobile.locator("#controls").bounding_box()
+            assert scene_box["height"] > 300
+            assert scene_box["y"] + scene_box["height"] <= controls_box["y"], "Controls cover the scene"
             if args.screenshots:
                 mobile.screenshot(path=args.screenshots / "mobile.png")
             assert not errors, errors
             browser.close()
-        print("PASS: rendered pixels, animation, orbit, controls, load recovery, mobile layout"
+        print("PASS: project URL prefix, rendered pixels, animation, orbit, controls, load recovery, mobile layout"
               + (", exported file and URL loading" if args.model else ""))
     finally:
         server.shutdown()

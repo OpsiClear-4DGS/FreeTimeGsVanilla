@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { deflateRawSync } from "node:zlib";
-import { crc32, openZip } from "../zip.js";
-import { decodeTSOG, validateTSOGMetadata } from "../tsog.js";
-import { sortVisible } from "../sort.js";
+import { crc32, openZip } from "../src/zip.js";
+import { decodeTSOG, validateTSOGMetadata } from "../src/tsog.js";
+import { sortVisible } from "../src/sort.js";
 
 function fixture({ bands = 0, discrete = false, motionBits = 16, stationary = false } = {}) {
   const images = {};

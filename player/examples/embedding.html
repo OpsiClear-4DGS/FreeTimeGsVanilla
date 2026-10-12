@@ -1,24 +1,43 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
-    />
-    <meta name="color-scheme" content="dark" />
-    <title>FTGS Player</title>
-    <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="../style.css?v=6" />
-  </head>
-  <body>
-    <main
-      id="viewer"
-      data-state="empty"
-      data-demo="true"
-      data-autoplay="false"
-      aria-label="FTGS player"
-    ></main>
-    <script type="module" src="./embedding.js?v=6"></script>
-  </body>
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Embedding · FTGS Player</title><link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../site/theme.css">
+  <link rel="stylesheet" href="../site/transport.css?v=4">
+  <link rel="stylesheet" href="./embedding.css?v=4">
+</head>
+<body>
+<main>
+  <div class="example-heading"><div><h1>Embedded player</h1><p id="description">Use the player inside your own page.</p></div><a href="https://github.com/OpsiClear-4DGS/ftgs-player/blob/main/docs/API.md">API docs ↗</a></div>
+  <nav aria-label="Examples"><div class="modes"><a id="canvas-example" href="?mode=canvas">Canvas</a><a id="iframe-example" href="?mode=iframe">Iframe</a></div><a id="jensen-example" class="button" href="?example=jensen-2m">Play example</a><a class="player-link" href="../">Open player ↗</a></nav>
+  <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5Z" /></symbol>
+    <symbol id="pause" viewBox="0 0 24 24"><path d="M7 5.5h3.5v13H7zm6.5 0H17v13h-3.5z" /></symbol>
+    <symbol id="sound" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4ZM15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" /></symbol>
+    <symbol id="silent" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4Zm5 4 5 6m0-6-5 6" /></symbol>
+    <symbol id="expand" viewBox="0 0 24 24"><path d="M8.5 4.5h-4v4m11-4h4v4m-15 7v4h4m11-4v4h-4" /></symbol>
+    <symbol id="collapse" viewBox="0 0 24 24"><path d="M4.5 8.5h4v-4m7 0v4h4m-15 7h4v4m7 0v-4h4" /></symbol>
+  </defs></svg>
+  <section id="player-stage" class="player-stage" aria-label="Embedded scene player">
+    <div id="viewer" data-state="empty"><canvas id="canvas" tabindex="0" aria-label="Animated scene"></canvas></div>
+    <div id="controls" class="controls">
+      <div class="transport" role="group" aria-label="Host playback controls">
+        <button id="play-toggle" class="icon-button" aria-label="Play" title="Play" disabled><svg class="solid-icon" aria-hidden="true"><use id="play-icon" href="#play" /></svg></button>
+        <div class="timeline-area"><input id="timeline" type="range" min="0" max="1" step="0.0001" value="0" aria-label="Seek" disabled></div>
+        <output id="timecode" aria-label="Playback time">0:00 / 0:00</output>
+        <div id="audio-controls" class="audio-controls" hidden><button id="mute-toggle" class="icon-button" aria-label="Mute" title="Mute" aria-pressed="false"><svg aria-hidden="true"><use id="audio-icon" href="#sound" /></svg></button></div>
+        <div class="utility-actions">
+          <select id="playback-rate" class="playback-rate" aria-label="Playback speed" title="Playback speed" disabled>
+            <option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option>
+          </select>
+          <button id="fullscreen" class="icon-button" aria-label="Fullscreen" title="Fullscreen"><svg aria-hidden="true"><use id="fullscreen-icon" href="#expand" /></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <p id="message" role="status"></p>
+</main>
+<script type="module" src="./embedding.js?v=3"></script>
+</body>
 </html>

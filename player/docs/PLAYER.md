@@ -84,7 +84,7 @@ python -m http.server 8765 --bind 127.0.0.1
 
 Open <http://localhost:8765/>. Serve the page over HTTP; opening `index.html`
 directly cannot load its modules and worker. Add `?demo=1` to play a synthetic
-ribbon generated in the browser. The retained Jensen 2M scene is available with `?example=jensen-2m`; it is fetched only when selected.
+ribbon generated in the browser. Slop Example is available with `?example=jensen-2m`; it is fetched only when selected.
 
 ## GitHub Pages and model links
 
@@ -131,7 +131,7 @@ view, for example with `URLSearchParams` as above.
 | Parameter | Value / default |
 | --- | --- |
 | `src` | HTTP(S) URL or relative path to a `.ftgs.ply` or `.tsog`. |
-| `example=jensen-2m` | Load the retained 2M Jensen scene, including audio and its camera; full points unless overridden. |
+| `example=jensen-2m` | Load Slop Example with 2M Gaussians, audio and its camera; full points unless overridden. |
 | `demo=1` | Load the generated ribbon when `src` is absent. |
 | `autoplay=0` | Start paused; otherwise start after loading. Audible autoplay may need a click. |
 | `loop=0` / `loop=1` | Override looping; omit to use the package default, or true if absent. |
@@ -303,7 +303,7 @@ metadata, media synchronization, autoplay handling, audio controls and cleanup:
 uv run --no-project --with playwright python tests/browser_audio.py
 ```
 
-All browser checks accept `--browser /path/to/chromium`. The Jensen example is recorded reconstruction data; conformance fixtures remain synthetic, and audio tests generate their tones in memory.
+All browser checks accept `--browser /path/to/chromium`. Slop Example is recorded reconstruction data; conformance fixtures remain synthetic, and audio tests generate their tones in memory.
 
 ## Origin and license
 

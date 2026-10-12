@@ -6,7 +6,7 @@ file, reconstruction and audio are unchanged.
 
 ## Measured example
 
-Jensen: 2,000,000 Gaussians, degree-3 SH, 65,536 shared centroids, 121
+Slop Example: 2,000,000 Gaussians, degree-3 SH, 65,536 shared centroids, 121
 timestamps, embedded audio, 45,106,423-byte TSOG. Measured on 2026-10-12 in
 Chromium 153 on Linux, headless SwiftShader, at 640×480. Each value is the
 median of three page loads. The baseline is commit `4af9e12`.
@@ -48,7 +48,7 @@ startup or offscreen graphics are unsupported. Invalid packages fail without
 retrying on the main thread. The raw file, codec and reconstructed values do
 not change.
 
-On the same full Jensen example, decode plus upload is 1.08 s, median of three
+On the same full Slop Example scene, decode plus upload is 1.08 s, median of three
 loads. The median worst 16 ms timer gap during decoding falls from 232 ms to
 16 ms; the first cold browser run still has a 170 ms gap. That measurement
 excludes the later GPU upload and is a responsiveness check, not a guarantee
@@ -61,7 +61,7 @@ test. The threshold, quantized depth bins, stable tie order and per-frame camera
 projection remain unchanged. Each output index buffer is separate and can be
 transferred without detaching the reusable scratch arrays.
 
-A paired warm comparison against commit `2cb5862`, across all 121 Jensen
+A paired warm comparison against commit `2cb5862`, across all 121 Slop Example
 timestamps, reduces median CPU sorting from 68.8 ms to 11.7 ms (about 5.9×).
 Initialization takes about 32 ms in the sorting worker. Visibility bounds add
 16 MB for 2M points; reusable scratch arrays use about 20.3 MB. Bounds are used
@@ -82,7 +82,7 @@ choice, rather than a quality setting.
 ## Verification and reproduction
 
 All position/time, motion/duration, covariance, opacity and logical SH values
-match the baseline byte for byte on the full Jensen example. Rendered frames
+match the baseline byte for byte on the full Slop Example scene. Rendered frames
 at normalized times 0.15 and 0.7 have identical SHA-256 pixel hashes. Synthetic
 checks cover SH0–3, continuous/discrete/static timelines, 8/16-bit motion,
 point sampling, malformed files, scheduler fallback and cancellation. Browser

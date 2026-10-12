@@ -137,7 +137,7 @@ try:
             for key in ('count','coefficients','hashes','frames'):
                 assert runs[0][key] == baseline[key], f'Baseline mismatch: {key}'
             print('Every logical attribute and both rendered frames match the baseline exactly.', flush=True)
-        args.output.write_text(json.dumps({'environment':'Chromium headless, SwiftShader, local HTTP, resident TSOG Blob, 640x480, full Jensen 2M','median':summary,'runs':runs},indent=2)+'\n')
+        args.output.write_text(json.dumps({'environment':'Chromium headless, SwiftShader, local HTTP, resident TSOG Blob, 640x480, full Slop Example (2M Gaussians)','median':summary,'runs':runs},indent=2)+'\n')
         print(json.dumps({'median':summary}), flush=True)
         browser.close()
 finally: server.shutdown(); server.server_close()

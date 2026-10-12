@@ -1,9 +1,12 @@
-# Jensen 2M example
+# Slop Example
 
 [Play the scene](https://opsiclear-4dgs.github.io/ftgs-player/?example=jensen-2m)
 or [download the TSOG](https://opsiclear-4dgs.github.io/ftgs-player/examples/assets/jensen-2m.tsog).
 The demo loads all 2,000,000 Gaussians and uses the saved front-view camera.
 The website fetches this file only when the example is selected.
+
+The display name is Slop Example. Existing `jensen-2m` URLs and filenames
+remain available for compatibility.
 
 `jensen-2m.tsog` is the unchanged reconstruction from
 [sam3dbx4danyone](https://github.com/OpsiClear-4DGS/sam3dbx4danyone):

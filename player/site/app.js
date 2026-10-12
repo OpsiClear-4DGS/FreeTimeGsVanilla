@@ -1,7 +1,7 @@
 import { FTGSPlayer } from "../src/player.js";
 import { attachPlayerBridge } from "./bridge.js";
 import { demoFile } from "./demo.js";
-import { mountPlayerShell } from "./shell.js?v=4";
+import { mountPlayerShell } from "./shell.js?v=5";
 import { readExample, downloadExample } from "./examples.js?v=3";
 
 mountPlayerShell(document.getElementById("viewer"));

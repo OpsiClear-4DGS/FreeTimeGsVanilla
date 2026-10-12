@@ -7,7 +7,7 @@ The shared tokens live in `site/theme.css`: neutral charcoal surfaces, silver
 accents, a 4 px spacing scale, restrained borders and 4–8 px corner radii.
 
 The opening screen is one compact panel: a single "Open scene" file drop area,
-a small example row labelled "Play example", and quiet resource links in the
+a small example row labelled "Slop Example", and quiet resource links in the
 panel heading. During playback, the scene occupies its own area above the
 playback dock, so controls never
 cover its content. Very tall viewports use a portrait canvas with space above

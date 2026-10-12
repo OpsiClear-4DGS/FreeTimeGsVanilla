@@ -14,4 +14,4 @@ for (const path of [
 ]) {
   await cp(new URL(path, root), new URL(path, output), { recursive: true });
 }
-console.log(`Static player, reusable modules and Jensen example: ${fileURLToPath(output)}`);
+console.log(`Static player, reusable modules and Slop Example: ${fileURLToPath(output)}`);

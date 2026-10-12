@@ -26,9 +26,9 @@ export function mountPlayerShell(viewer) {
           <span class="empty-title">Open scene</span>
           <span class="empty-caption">or drop a .tsog or .ftgs.ply file</span>
         </button>
-        <a class="example-link" href="?example=jensen-2m" aria-label="Play example scene">
+        <a class="example-link" href="?example=jensen-2m" aria-label="Play Slop Example">
           <span class="example-preview"><img src="${new URL('./assets/example.png', import.meta.url).href}" alt="" /></span>
-          <span class="example-description"><span class="example-title">Play example</span><span class="example-caption">5 seconds · audio · 45 MB</span></span>
+          <span class="example-description"><span class="example-title">Slop Example</span><span class="example-caption">5 seconds · audio · 45 MB</span></span>
           <span class="preview-play"><svg aria-hidden="true"><use href="#play" /></svg></span>
         </a>
       </div>

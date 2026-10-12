@@ -505,7 +505,7 @@ built-in controls; the canvas snippet uses modules served by your own project.
 The [hosted embedding example](https://opsiclear-4dgs.github.io/ftgs-player/examples/embedding.html?mode=iframe)
 and player include static X large-image cards and Open Graph tags with a
 1200×675 thumbnail and no personal account attribution. Share the dedicated
-[Jensen scene page](https://opsiclear-4dgs.github.io/ftgs-player/examples/jensen-2m.html)
+[Slop Example scene page](https://opsiclear-4dgs.github.io/ftgs-player/examples/jensen-2m.html)
 for an image link to the interactive 4DGS player. It opens the full scene,
 paused with audio enabled; press Play to start playback. X controls preview
 display and whether links open in its in-app browser. Actual previews require

@@ -19,7 +19,7 @@ browser blocks autoplay with sound. Local files stay in your browser.
 
 TSOG loading preserves shared SH palettes and runs decoding off the UI thread
 where supported. Sorting caches conservative visibility bounds and reuses
-scratch buffers. The full Jensen example decodes and uploads in about 1.1 s;
+scratch buffers. The full Slop Example scene decodes and uploads in about 1.1 s;
 warm sorting fell from 68.8 ms to 11.7 ms in headless Chromium. All Gaussians,
 coefficients and rendering behavior are preserved.
 [Loading benchmarks and quality checks](docs/PERFORMANCE.md).
@@ -35,10 +35,10 @@ coefficients and rendering behavior are preserved.
 forwarding to these modules for existing integrations, including TSOG packaging.
 The examples use the same speed, audio and fullscreen controls for canvas and
 iframe hosts, and show mode-specific integration code below the player with
-a Copy code button. The Jensen example is fetched only when selected; its 45 MB
+a Copy code button. Slop Example is fetched only when selected; its 45 MB
 model is hosted in the standalone project. `?demo=1` uses a generated scene.
 
-Share the [Jensen scene page](https://opsiclear-4dgs.github.io/ftgs-player/examples/jensen-2m.html)
+Share the [Slop Example scene page](https://opsiclear-4dgs.github.io/ftgs-player/examples/jensen-2m.html)
 for an image link to the interactive 4DGS player. The scene page, main player
 and embedding examples include static `summary_large_image` and Open Graph
 tags with a 1200×675 thumbnail and no personal account attribution. The scene
